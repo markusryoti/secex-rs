@@ -1,0 +1,9 @@
+/target
+
+release-v*/
+firecracker
+vmlinux-*
+ubuntu-*
+squashfs-root/
+firecracker.log
+id_rsa*
