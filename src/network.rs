@@ -1,11 +1,13 @@
 use std::process::Command;
 
 pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
+    let tap_dev = "tap0";
+
     Command::new("sudo")
         .arg("ip")
         .arg("link")
         .arg("del")
-        .arg(tap_ip.to_string())
+        .arg(tap_dev)
         .status()
         .expect("Failed to delete existing TAP device");
 
@@ -14,7 +16,7 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
         .arg("tuntap")
         .arg("add")
         .arg("dev")
-        .arg(tap_ip.to_string())
+        .arg(tap_dev)
         .arg("mode")
         .arg("tap")
         .status()
@@ -26,7 +28,7 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
         .arg("add")
         .arg(format!("{}/30", tap_ip.to_string()))
         .arg("dev")
-        .arg(tap_ip.to_string())
+        .arg(tap_dev)
         .status()
         .expect("Failed to add address to TAP device");
 
@@ -35,7 +37,7 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
         .arg("link")
         .arg("set")
         .arg("dev")
-        .arg(tap_ip.to_string())
+        .arg(tap_dev)
         .arg("up")
         .status()
         .expect("Failed to set TAP device up");
@@ -70,6 +72,8 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
         .as_str()
         .expect("Failed to get host interface name");
 
+    println!("Host interface for NAT: {}", host_iface);
+
     Command::new("sudo")
         .arg("iptables")
         .arg("-t")
@@ -81,7 +85,7 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
         .arg("-j")
         .arg("MASQUERADE")
         .status()
-        .expect("Failed to delete existing iptables MASQUERADE rule");
+        .ok(); // Ignore error if rule doesn't exist
 
     Command::new("sudo")
         .arg("iptables")
