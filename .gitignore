@@ -9,3 +9,5 @@ firecracker.log
 id_rsa*
 
 vm_config.json
+vm-*.json
+vm-*.log

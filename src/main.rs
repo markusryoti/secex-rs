@@ -5,7 +5,23 @@ use secure_exec_rs::FirecrackerConfig;
 
 mod network;
 
-const VMS: Vec<VmConfig> = Vec::new();
+struct VmStore {
+    vms: Vec<VmConfig>,
+}
+
+impl VmStore {
+    pub fn new() -> Self {
+        VmStore { vms: Vec::new() }
+    }
+
+    pub fn add_vm(&mut self, vm: VmConfig) {
+        self.vms.push(vm);
+    }
+
+    pub fn len(&self) -> usize {
+        self.vms.len()
+    }
+}
 
 struct VmConfig {
     id: String,
@@ -17,11 +33,10 @@ struct VmConfig {
 }
 
 impl VmConfig {
-    pub fn new() -> Self {
-        let sequence_num = VMS.len() + 1;
-        let id = format!("vm-{}", sequence_num);
-        let socket_name = format!("/tmp/firecracker-{}.socket", sequence_num);
-        let tap = format!("tap{}", sequence_num);
+    pub fn new(seq: usize) -> Self {
+        let id = format!("vm-{}", seq);
+        let socket_name = format!("/tmp/firecracker-{}.socket", seq);
+        let tap = format!("tap{}", seq);
 
         VmConfig {
             id: id,
@@ -32,72 +47,93 @@ impl VmConfig {
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
         }
     }
-}
 
-fn edit_vm_config(current_dir: &PathBuf, vm_config: &VmConfig) {
-    let mut config = FirecrackerConfig::from_file(&current_dir.join("vm_config_template.json"))
-        .expect("Failed to read Firecracker config file");
+    pub fn initialize(&self) {
+        self.edit_vm_config();
+        self.remove_existing_socket();
+        self.setup_vm_network();
+    }
 
-    config.fill_values(
-        current_dir
-            .join("vmlinux-6.1.155")
-            .to_str()
-            .expect("Invalid kernel path"),
-        current_dir
-            .join("ubuntu-24.04.ext4")
-            .to_str()
-            .expect("Invalid rootfs path"),
-        vm_config.tap.as_str(),
-        vm_config.mac.to_string().as_str(),
-        current_dir
-            .join("firecracker.log")
-            .to_str()
-            .expect("Invalid log path"),
-    );
+    pub fn launch(&self) -> std::process::Child {
+        let current_dir = std::env::current_dir().expect("Failed to get current directory");
+        let firecracker_path = current_dir.join("firecracker");
 
-    config
-        .to_file(&current_dir.join("vm_config.json"))
-        .expect("Failed to write Firecracker config file");
+        let child = Command::new("sudo")
+            .arg(&firecracker_path)
+            .arg("--api-sock")
+            .arg(self.api_socket.to_str().unwrap())
+            .arg("--enable-pci")
+            .arg("--config-file")
+            .arg(
+                current_dir
+                    .join(format!("{}-vm_config.json", self.id))
+                    .to_str()
+                    .unwrap(),
+            )
+            .spawn()
+            .expect("Failed to start firecracker");
 
-    println!("Wrote Firecracker config to vm_config.json",);
-}
+        child
+    }
 
-fn remove_existing_socket(socket_path: &str) {
-    Command::new("sudo")
-        .arg("rm")
-        .arg("-f")
-        .arg(socket_path)
-        .status()
-        .expect("Failed to remove socket with sudo");
+    fn edit_vm_config(&self) {
+        let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
-    println!("Removed existing socket at {}", socket_path);
-}
+        let mut config = FirecrackerConfig::from_file(&current_dir.join("vm_config_template.json"))
+            .expect("Failed to read Firecracker config file");
 
-fn setup_vm_network(tap_ip: &Ipv4Addr) {
-    network::set_network_interface(&tap_ip);
-    println!("Set up VM network with TAP device at {}", tap_ip);
+        let log_path = current_dir.join(format!("{}-firecracker.log", self.id));
+
+        config.fill_values(
+            current_dir
+                .join("vmlinux-6.1.155")
+                .to_str()
+                .expect("Invalid kernel path"),
+            current_dir
+                .join("ubuntu-24.04.ext4")
+                .to_str()
+                .expect("Invalid rootfs path"),
+            self.tap.as_str(),
+            self.mac.to_string().as_str(),
+            current_dir
+                .join(log_path)
+                .to_str()
+                .expect("Invalid log path"),
+        );
+
+        let config_file = current_dir.join(format!("{}-vm_config.json", self.id));
+
+        config
+            .to_file(&config_file)
+            .expect("Failed to write Firecracker config file");
+
+        println!("Wrote Firecracker config to {}", config_file.display());
+    }
+
+    fn remove_existing_socket(&self) {
+        Command::new("sudo")
+            .arg("rm")
+            .arg("-f")
+            .arg(self.api_socket.to_str().unwrap())
+            .status()
+            .expect("Failed to remove socket with sudo");
+
+        println!("Removed existing socket at {}", self.api_socket.display());
+    }
+
+    fn setup_vm_network(&self) {
+        network::set_network_interface(&self.host_ip);
+        println!("Set up VM network with TAP device at {}", self.host_ip);
+    }
 }
 
 fn main() {
-    let current_dir = std::env::current_dir().expect("Failed to get current directory");
-    println!("Current directory: {}", current_dir.display());
+    let store = &mut VmStore::new();
 
-    let vm = VmConfig::new();
-
-    edit_vm_config(&current_dir, &vm);
-    remove_existing_socket(vm.api_socket.to_str().unwrap());
-    setup_vm_network(&vm.host_ip);
-
-    let firecracker_path = current_dir.join("firecracker");
-    let child = Command::new("sudo")
-        .arg(&firecracker_path)
-        .arg("--api-sock")
-        .arg(vm.api_socket.to_str().unwrap())
-        .arg("--enable-pci")
-        .arg("--config-file")
-        .arg(current_dir.join("vm_config.json"))
-        .spawn()
-        .expect("Failed to start firecracker");
+    let vm = VmConfig::new(store.len() + 1);
+    vm.initialize();
+    let child = vm.launch();
+    store.add_vm(vm);
 
     println!("Firecracker started with PID: {}", child.id());
 
