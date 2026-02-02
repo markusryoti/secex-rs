@@ -18,6 +18,10 @@ impl VmStore {
         self.vms.push(vm);
     }
 
+    pub fn get(&self, id: &str) -> Option<&VmConfig> {
+        self.vms.iter().find(|vm| vm.id == id)
+    }
+
     pub fn len(&self) -> usize {
         self.vms.len()
     }
@@ -64,12 +68,7 @@ impl VmConfig {
             .arg(self.api_socket.to_str().unwrap())
             .arg("--enable-pci")
             .arg("--config-file")
-            .arg(
-                current_dir
-                    .join(format!("{}-vm_config.json", self.id))
-                    .to_str()
-                    .unwrap(),
-            )
+            .arg(current_dir.join(self.config_name()))
             .spawn()
             .expect("Failed to start firecracker");
 
@@ -101,13 +100,17 @@ impl VmConfig {
                 .expect("Invalid log path"),
         );
 
-        let config_file = current_dir.join(format!("{}-vm_config.json", self.id));
+        let config_file = current_dir.join(self.config_name());
 
         config
             .to_file(&config_file)
             .expect("Failed to write Firecracker config file");
 
         println!("Wrote Firecracker config to {}", config_file.display());
+    }
+
+    fn config_name(&self) -> String {
+        format!("{}-vm_config.json", self.id)
     }
 
     fn remove_existing_socket(&self) {
@@ -131,9 +134,16 @@ fn main() {
     let store = &mut VmStore::new();
 
     let vm = VmConfig::new(store.len() + 1);
+    let vm_id = vm.id.clone();
+
+    store.add_vm(vm);
+
+    let vm = store
+        .get(&vm_id)
+        .expect("Failed to retrieve VM configuration");
+
     vm.initialize();
     let child = vm.launch();
-    store.add_vm(vm);
 
     println!("Firecracker started with PID: {}", child.id());
 
