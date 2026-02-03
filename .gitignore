@@ -1,1 +1,7 @@
 target/
+
+# Init binary
+init
+
+rootfs/
+rootfs.ext4
