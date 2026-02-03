@@ -5,3 +5,11 @@ init
 
 rootfs/
 rootfs.ext4
+
+release-v*/
+
+vmlinux-*
+firecracker
+
+*.log
+vm-*_config.json

@@ -78,8 +78,10 @@ impl VmConfig {
     fn edit_vm_config(&self) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
-        let mut config = FirecrackerConfig::from_file(&current_dir.join("vm_config_template.json"))
-            .expect("Failed to read Firecracker config file");
+        let mut config = FirecrackerConfig::from_file(
+            &current_dir.join("crates/orchestrator/vm_config_template.json"),
+        )
+        .expect("Failed to read Firecracker config file");
 
         let log_path = current_dir.join(format!("{}-firecracker.log", self.id));
 
@@ -89,11 +91,11 @@ impl VmConfig {
                 .to_str()
                 .expect("Invalid kernel path"),
             current_dir
-                .join("ubuntu-24.04.ext4")
+                .join("crates/orchestrator/ubuntu-24.04.ext4")
                 .to_str()
                 .expect("Invalid rootfs path"),
-            self.tap.as_str(),
-            self.mac.to_string().as_str(),
+            &self.tap,
+            &self.mac.to_string(),
             current_dir
                 .join(log_path)
                 .to_str()
