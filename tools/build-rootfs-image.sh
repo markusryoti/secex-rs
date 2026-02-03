@@ -2,8 +2,6 @@
 
 set -e
 
-cp target/debug/init rootfs/init
-
 docker build -t vm-rootfs rootfs
 
 container_id=$(docker create vm-rootfs)
