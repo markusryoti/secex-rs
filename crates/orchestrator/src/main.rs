@@ -1,7 +1,7 @@
 use std::{net::Ipv4Addr, path::PathBuf, process::Command};
 
 use macaddr::{MacAddr, MacAddr6};
-use secure_exec_rs::FirecrackerConfig;
+use orchestrator::FirecrackerConfig;
 
 mod network;
 
