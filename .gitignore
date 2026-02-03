@@ -1,9 +1,9 @@
 target/
+build/
 
 # Init binary
 init
 
-rootfs/
 rootfs.ext4
 
 release-v*/

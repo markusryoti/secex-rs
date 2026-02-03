@@ -89,7 +89,7 @@ impl VmConfig {
                 .to_str()
                 .expect("Invalid kernel path"),
             current_dir
-                .join("crates/orchestrator/ubuntu-24.04.ext4")
+                .join("build/rootfs.ext4")
                 .to_str()
                 .expect("Invalid rootfs path"),
             &self.tap,
