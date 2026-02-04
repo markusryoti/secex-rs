@@ -18,7 +18,9 @@ fn main() {
 
     println!("Firecracker started with PID: {}", child.id());
 
-    child
+    let out = child
         .wait_with_output()
         .expect("Failed to wait on firecracker process");
+
+    println!("Firecracker process exited with status: {}", out.status);
 }
