@@ -44,6 +44,8 @@ fn main() {
 
     println!("Work finished. Shutting down...");
 
+    nix::unistd::sync();
+
     // This tells the kernel to power down the system
-    reboot(RebootMode::RB_POWER_OFF).expect("Power off failed");
+    reboot(RebootMode::RB_AUTOBOOT).expect("Power off failed");
 }
