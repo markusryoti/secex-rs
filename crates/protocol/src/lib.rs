@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Serialize, Deserialize)]
 pub struct Envelope {
@@ -18,7 +21,7 @@ pub enum Message {
     Shutdown,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RunCommand {
     pub id: String,
     pub command: Vec<String>,
@@ -41,4 +44,31 @@ pub struct ExitStatus {
 #[derive(Serialize, Deserialize)]
 pub struct Cancel {
     pub id: String,
+}
+
+pub fn send_msg<T: Serialize>(
+    stream: &mut impl Write,
+    msg: &T,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let data = serde_json::to_vec(msg)?;
+    let len = (data.len() as u32).to_be_bytes();
+
+    stream.write_all(&len)?;
+    stream.write_all(&data)?;
+
+    Ok(())
+}
+
+pub fn recv_msg<T: DeserializeOwned>(
+    stream: &mut impl Read,
+) -> Result<T, Box<dyn std::error::Error>> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf)?;
+
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0; len];
+
+    stream.read_exact(&mut buf)?;
+
+    Ok(serde_json::from_slice(&buf)?)
 }

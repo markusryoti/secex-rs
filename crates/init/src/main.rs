@@ -2,12 +2,9 @@ use std::path::Path;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
+use tokio_vsock::VsockAddr;
 
-fn main() {
-    println!("Init started. Checking mounts...");
-
-    // Mount devtmpfs only if not already mounted
-    // We check for /dev/null as a sign of life
+fn mount_drives() {
     if !Path::new("/dev/null").exists() {
         match mount(
             Some("devtmpfs"),
@@ -37,13 +34,46 @@ fn main() {
         MsFlags::empty(),
         None::<&str>,
     );
+}
+
+#[tokio::main]
+async fn main() {
+    println!("Init started. Checking mounts...");
+
+    mount_drives();
 
     println!("Mounts complete. Entering main loop.");
 
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    let (mut stream, _) = tokio_vsock::VsockListener::bind(VsockAddr::new(3, 1024))
+        .expect("Failed to bind vsock listener")
+        .accept()
+        .await
+        .expect("Failed to accept vsock connection");
+
+    loop {
+        let msg = protocol::recv_msg::<protocol::Envelope>(&mut stream)
+            .expect("Failed to receive message");
+
+        match msg.message {
+            protocol::Message::RunCommand(run_command) => {
+                println!("Received RunCommand: {:?}", run_command);
+            }
+            protocol::Message::Stdout(stream_chunk) => todo!(),
+            protocol::Message::Stderr(stream_chunk) => todo!(),
+            protocol::Message::Exit(exit_status) => todo!(),
+            protocol::Message::Cancel(cancel) => todo!(),
+            protocol::Message::Shutdown => {
+                println!("Received shutdown message. Exiting main loop.");
+                break;
+            }
+        }
+    }
+
+    // std::thread::sleep(std::time::Duration::from_secs(10));
 
     println!("Work finished. Shutting down...");
 
+    // Flush all file system buffers to ensure data integrity before rebooting
     nix::unistd::sync();
 
     // This tells the kernel to power down the system
