@@ -258,8 +258,11 @@ name = "orchestrator"
 version = "0.1.0"
 dependencies = [
  "macaddr",
+ "protocol",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-vsock",
  "uuid",
 ]
 

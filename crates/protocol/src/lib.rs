@@ -13,6 +13,7 @@ pub struct Envelope {
 
 #[derive(Serialize, Deserialize)]
 pub enum Message {
+    Hello,
     RunCommand(RunCommand),
     Stdout(StreamChunk),
     Stderr(StreamChunk),
@@ -31,8 +32,19 @@ pub struct RunCommand {
 
 #[derive(Serialize, Deserialize)]
 pub struct StreamChunk {
-    pub id: String,
+    // pub id: String,
+    // pub data: Vec<u8>,
+    pub job_id: String,
+    pub stream: StreamType,
     pub data: Vec<u8>,
+    pub eof: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum StreamType {
+    Stdin,
+    Stdout,
+    Stderr,
 }
 
 #[derive(Serialize, Deserialize)]

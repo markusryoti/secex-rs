@@ -2,7 +2,8 @@ use std::path::Path;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio_vsock::VsockAddr;
+use tokio::net::UnixStream;
+use tokio_vsock::{VsockAddr, VsockStream};
 
 fn mount_drives() {
     if !Path::new("/dev/null").exists() {
@@ -44,17 +45,21 @@ async fn main() {
 
     println!("Mounts complete. Entering main loop.");
 
-    let (mut stream, _) = tokio_vsock::VsockListener::bind(VsockAddr::new(3, 1024))
-        .expect("Failed to bind vsock listener")
-        .accept()
+    let mut stream = VsockStream::connect(VsockAddr::new(2, 5000))
         .await
-        .expect("Failed to accept vsock connection");
+        .expect("Failed to connect to orchestrator vsock");
+
+    println!("Connected to orchestrator");
 
     loop {
         let msg = protocol::recv_msg::<protocol::Envelope>(&mut stream)
             .expect("Failed to receive message");
 
         match msg.message {
+            protocol::Message::Hello => {
+                println!("Received Hello message from orchestrator");
+                break;
+            }
             protocol::Message::RunCommand(run_command) => {
                 println!("Received RunCommand: {:?}", run_command);
             }

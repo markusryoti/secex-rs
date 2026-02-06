@@ -33,7 +33,11 @@
       "host_dev_name": "${TAP_DEV}"
     }
   ],
-  "vsock": null,
+  "vsock": {
+    "vsock_id": "vsock3",
+    "guest_cid": 2,
+    "uds_path": "/tmp/vsock3.sock"
+  },
   "logger": {
     "log_path": "${LOG_PATH}",
     "level": "Debug",
