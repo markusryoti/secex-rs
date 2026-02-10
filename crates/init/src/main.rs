@@ -68,17 +68,24 @@ async fn main() {
     let mut count = 0;
     const MAX_ATTEMPTS: u32 = 30;
 
+    println!("Attempting to connect to orchestrator at CID 2, port 5001...");
+
     let mut stream = loop {
         // Guest (CID 3) connects to host (CID 2) on port 5001
         // This connection gets bridged to the Unix socket /tmp/vsock-vm-1.sock
         match VsockStream::connect(VsockAddr::new(2, 5001)).await {
-            Ok(s) => break s,
-            Err(_) => {
+            Ok(s) => {
+                println!("Successfully connected to orchestrator!");
+                break s;
+            }
+            Err(e) => {
                 if count >= MAX_ATTEMPTS {
+                    eprintln!("Error on last attempt: {}", e);
                     panic!("Failed to connect to orchestrator after {} attempts", MAX_ATTEMPTS);
                 }
                 println!(
-                    "Waiting for orchestrator to be ready... ({} attempts left)",
+                    "Connection attempt {} failed: {}. Retrying... ({} attempts left)",
+                    count + 1, e,
                     MAX_ATTEMPTS - count
                 );
                 tokio::time::sleep(Duration::from_millis(200)).await;
