@@ -37,6 +37,14 @@ fn mount_drives() {
     );
 }
 
+fn shutdown_actions() {
+    // Flush all file system buffers to ensure data integrity before rebooting
+    nix::unistd::sync();
+
+    // This tells the kernel to power down the system
+    reboot(RebootMode::RB_AUTOBOOT).expect("Power off failed");
+}
+
 #[tokio::main]
 async fn main() {
     println!("Init started. Checking mounts...");
@@ -49,26 +57,34 @@ async fn main() {
         println!("ERROR: /dev/vsock does not exist! Make sure the driver is loaded.");
     }
 
-    println!("Init started. Listening on cid 2, port 5001...");
+    println!("Init started. Listening on cid 3, port 5001...");
 
-    let listener =
-        VsockListener::bind(VsockAddr::new(2, 5001)).expect("Failed to bind vsock listener");
+    let listener = match VsockListener::bind(VsockAddr::new(3, 5001)) {
+        Ok(l) => l,
+        Err(e) => {
+            println!("Failed to bind vsock listener: {}", e);
+            shutdown_actions();
+            return;
+        }
+    };
 
-    let (mut stream, addr) = listener
-        .accept()
-        .await
-        .expect("Failed to accept connection");
+    let (mut stream, addr) = match listener.accept().await {
+        Ok((s, a)) => (s, a),
+        Err(e) => {
+            println!("Failed to accept vsock connection: {}", e);
+            shutdown_actions();
+            return;
+        }
+    };
 
     println!("Connection accepted from {:?}", addr);
 
     let mut buffer = vec![0u8; 4];
-    stream.read_exact(&mut buffer).await.unwrap();
 
-    println!("Work finished. Shutting down...");
+    match stream.read_exact(&mut buffer).await {
+        Ok(_) => println!("Received data from vsock: {:?}", buffer),
+        Err(e) => println!("Failed to read from vsock: {}", e),
+    }
 
-    // Flush all file system buffers to ensure data integrity before rebooting
-    nix::unistd::sync();
-
-    // This tells the kernel to power down the system
-    reboot(RebootMode::RB_AUTOBOOT).expect("Power off failed");
+    shutdown_actions();
 }
