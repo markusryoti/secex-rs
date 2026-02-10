@@ -20,6 +20,8 @@ async fn main() {
         .expect("Failed to retrieve VM configuration");
 
     let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm_id);
+    let _ = std::fs::remove_file(&vsock_uds_path);
+
     vm.initialize(&vsock_uds_path);
     let _child = vm.launch();
 
@@ -31,62 +33,61 @@ async fn main() {
         vsock_uds_path
     );
 
-    // Wait for the vsock socket to be created by Firecracker
-    let mut attempts = 0;
-    const MAX_ATTEMPTS: u32 = 50;
+    while !std::path::Path::new(&vsock_uds_path).exists() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    println!(
+        "Unix socket {} is now available. Attempting to connect...",
+        vsock_uds_path
+    );
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
     let mut stream = loop {
         match UnixStream::connect(&vsock_uds_path).await {
             Ok(s) => break s,
-            Err(_) => {
-                if attempts >= MAX_ATTEMPTS {
-                    panic!(
-                        "Failed to connect to vsock Unix socket after {} attempts",
-                        MAX_ATTEMPTS
-                    );
-                }
+            Err(e) => {
+                // Log the error to see if it's "Connection Refused" (normal while booting)
+                // or something else.
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                attempts += 1;
             }
         }
     };
 
-    println!("Connected to vsock Unix socket");
+    println!("Connection established with Firecracker proxy!");
 
-    // Now wait for the guest to initiate a connection
-    // The guest will connect to CID 2 port 5001, which bridges to this socket
-    println!("Waiting for guest to connect...");
+    // 3. MANDATORY HANDSHAKE: Tell Firecracker which guest port to connect to
+    // Firecracker listens on the UDS but needs to know where to route the traffic
+    let handshake = "CONNECT 5001\n";
+    stream.write_all(handshake.as_bytes()).await.unwrap();
 
-    // Read guest's Hello message
-    let mut buffer = vec![0u8; 4];
-    match tokio::time::timeout(Duration::from_secs(30), stream.read_exact(&mut buffer)).await {
-        Ok(Ok(_)) => {
-            let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
-            let mut msg_buffer = vec![0u8; len];
-            stream
-                .read_exact(&mut msg_buffer)
-                .await
-                .expect("Failed to read message");
-            println!("Received message from guest");
-        }
-        Ok(Err(e)) => eprintln!("Error reading guest message: {}", e),
-        Err(_) => eprintln!("Timeout waiting for guest message"),
+    // 4. Read the response from Firecracker (e.g., "OK 5001\n")
+    let mut response = [0u8; 32];
+    let n = stream
+        .read(&mut response)
+        .await
+        .expect("Failed to read handshake response");
+    let resp_str = String::from_utf8_lossy(&response[..n]);
+
+    if !resp_str.starts_with("OK") {
+        panic!("Firecracker vsock handshake failed: {}", resp_str);
     }
 
-    // Send Hello message to guest
+    println!("Vsock circuit established to guest port 5001!");
+
+    // --- Communication Logic ---
+    // Send your Hello message
     let env = protocol::Envelope {
         version: 1,
         message: protocol::Message::Hello,
     };
-
-    let data = serde_json::to_vec(&env).expect("Error writing message");
-    let len = (data.len() as u32).to_be_bytes();
-
+    let data = serde_json::to_vec(&env).unwrap();
     stream
-        .write_all(&len)
+        .write_all(&(data.len() as u32).to_be_bytes())
         .await
-        .expect("Failed to write length");
-    stream.write_all(&data).await.expect("Failed to write data");
+        .unwrap();
+    stream.write_all(&data).await.unwrap();
 
-    println!("Sent Hello to guest");
-    println!("Communication with guest established");
+    println!("Sent Hello message to guest");
 }
