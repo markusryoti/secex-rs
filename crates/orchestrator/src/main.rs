@@ -6,33 +6,7 @@ use tokio::net::UnixStream;
 mod network;
 mod vm;
 
-#[tokio::main]
-async fn main() {
-    let store = &mut vm::VmStore::new();
-
-    let vm = vm::VmConfig::new(store.len() + 1);
-    let vm_id = vm.id.clone();
-
-    store.add_vm(vm);
-
-    let vm = store
-        .get(&vm_id)
-        .expect("Failed to retrieve VM configuration");
-
-    let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm_id);
-    let _ = std::fs::remove_file(&vsock_uds_path);
-
-    vm.initialize(&vsock_uds_path);
-    let _child = vm.launch();
-
-    println!("Firecracker started");
-
-    // The vsock device bridges connections from the guest (CID 3) to this Unix socket
-    println!(
-        "Connecting to guest via Unix socket at {}...",
-        vsock_uds_path
-    );
-
+async fn wait_for_socket(vsock_uds_path: &str) {
     while !std::path::Path::new(&vsock_uds_path).exists() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -41,11 +15,16 @@ async fn main() {
         "Unix socket {} is now available. Attempting to connect...",
         vsock_uds_path
     );
+}
 
-    tokio::time::sleep(Duration::from_secs(5)).await;
+async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
+    println!(
+        "Connecting to guest via Unix socket at {}...",
+        vsock_uds_path
+    );
 
-    let mut stream = loop {
-        let mut s = match UnixStream::connect(&vsock_uds_path).await {
+    let stream = loop {
+        let mut s = match UnixStream::connect(vsock_uds_path).await {
             Ok(s) => s,
             Err(e) => {
                 println!("Failed to connect to vsock UDS: {}", e);
@@ -74,46 +53,19 @@ async fn main() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    // let mut stream = loop {
-    //     match UnixStream::connect(&vsock_uds_path).await {
-    //         Ok(s) => break s,
-    //         Err(e) => {
-    //             // Log the error to see if it's "Connection Refused" (normal while booting)
-    //             // or something else.
-    //             println!("Failed to connect to vsock UDS: {}", e);
-    //             tokio::time::sleep(Duration::from_millis(100)).await;
-    //         }
-    //     }
-    // };
-
-    // println!("Connection established with Firecracker proxy!");
-
-    // // 3. MANDATORY HANDSHAKE: Tell Firecracker which guest port to connect to
-    // // Firecracker listens on the UDS but needs to know where to route the traffic
-    // let handshake = "CONNECT 5001\n";
-    // stream.write_all(handshake.as_bytes()).await.unwrap();
-
-    // 4. Read the response from Firecracker (e.g., "OK 5001\n")
-    let mut response = [0u8; 32];
-    let n = stream
-        .read(&mut response)
-        .await
-        .expect("Failed to read handshake response");
-    let resp_str = String::from_utf8_lossy(&response[..n]);
-
-    if !resp_str.starts_with("OK") {
-        panic!("Firecracker vsock handshake failed: {}", resp_str);
-    }
-
     println!("Vsock circuit established to guest port 5001!");
 
-    // --- Communication Logic ---
-    // Send your Hello message
+    stream
+}
+
+async fn send_hello(stream: &mut UnixStream) {
     let env = protocol::Envelope {
         version: 1,
         message: protocol::Message::Hello,
     };
+
     let data = serde_json::to_vec(&env).unwrap();
+
     stream
         .write_all(&(data.len() as u32).to_be_bytes())
         .await
@@ -121,4 +73,80 @@ async fn main() {
     stream.write_all(&data).await.unwrap();
 
     println!("Sent Hello message to guest");
+}
+
+async fn handle_incoming(stream: &mut UnixStream) {
+    loop {
+        let mut len_buf = [0u8; 4];
+        if let Err(_) = stream.read_exact(&mut len_buf).await {
+            println!("Connection closed by host.");
+            break;
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
+
+        let mut msg_buf = vec![0u8; len];
+        stream
+            .read_exact(&mut msg_buf)
+            .await
+            .expect("Failed to read message body");
+
+        let envelope: protocol::Envelope =
+            serde_json::from_slice(&msg_buf).expect("Failed to parse JSON");
+
+        match envelope.message {
+            protocol::Message::Hello => {
+                println!("Guest said Hello!");
+                break;
+            }
+            _ => println!("Received other message"),
+        }
+    }
+}
+
+async fn send_shutdown(stream: &mut UnixStream) {
+    let shutdown_msg = protocol::Envelope {
+        version: 1,
+        message: protocol::Message::Shutdown,
+    };
+
+    let shutdown_data = serde_json::to_vec(&shutdown_msg).unwrap();
+    stream
+        .write_all(&(shutdown_data.len() as u32).to_be_bytes())
+        .await
+        .unwrap();
+    stream.write_all(&shutdown_data).await.unwrap();
+
+    println!("Sent Shutdown message to guest, closing connection...");
+}
+
+#[tokio::main]
+async fn main() {
+    let store = &mut vm::VmStore::new();
+
+    let vm = vm::VmConfig::new(store.len() + 1);
+    let vm_id = vm.id.clone();
+
+    store.add_vm(vm);
+
+    let vm = store
+        .get(&vm_id)
+        .expect("Failed to retrieve VM configuration");
+
+    let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm_id);
+    let _ = std::fs::remove_file(&vsock_uds_path);
+
+    vm.initialize(&vsock_uds_path);
+    let _child = vm.launch();
+
+    println!("Firecracker started");
+
+    wait_for_socket(&vsock_uds_path).await;
+
+    let mut stream = connect_to_vsock(&vsock_uds_path).await;
+
+    send_hello(&mut stream).await;
+    handle_incoming(&mut stream).await;
+
+    println!("Initiating shutdown sequence...");
+    send_shutdown(&mut stream).await;
 }

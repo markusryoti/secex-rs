@@ -2,7 +2,7 @@ use std::path::Path;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_vsock::{VsockAddr, VsockListener};
 
 fn mount_drives() {
@@ -79,11 +79,46 @@ async fn main() {
 
     println!("Connection accepted from {:?}", addr);
 
-    let mut buffer = vec![0u8; 4];
+    loop {
+        let mut len_buf = [0u8; 4];
+        if let Err(_) = stream.read_exact(&mut len_buf).await {
+            println!("Connection closed by host.");
+            break;
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
 
-    match stream.read_exact(&mut buffer).await {
-        Ok(_) => println!("Received data from vsock: {:?}", buffer),
-        Err(e) => println!("Failed to read from vsock: {}", e),
+        let mut msg_buf = vec![0u8; len];
+        stream
+            .read_exact(&mut msg_buf)
+            .await
+            .expect("Failed to read message body");
+
+        let envelope: protocol::Envelope =
+            serde_json::from_slice(&msg_buf).expect("Failed to parse JSON");
+
+        match envelope.message {
+            protocol::Message::Hello => {
+                println!("Orchestrator said Hello! Sending response...");
+
+                let response = protocol::Envelope {
+                    version: 1,
+                    message: protocol::Message::Hello, // Or a 'Ready' variant
+                };
+                let resp_data = serde_json::to_vec(&response).unwrap();
+
+                stream
+                    .write_all(&(resp_data.len() as u32).to_be_bytes())
+                    .await
+                    .unwrap();
+                stream.write_all(&resp_data).await.unwrap();
+                stream.flush().await.unwrap();
+            }
+            protocol::Message::Shutdown => {
+                println!("Shutting down guest...");
+                break;
+            }
+            _ => println!("Received other message"),
+        }
     }
 
     shutdown_actions();

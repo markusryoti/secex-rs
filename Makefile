@@ -19,4 +19,7 @@ list-sockets:
 	ls -l /tmp | grep -e 'vsock-vm-.*\.sock' -e 'firecracker-.*\.socket' || echo "No sockets found"
 
 remove-logs:
-	find . -name "vm-*-firecracker.log" -type f -delete; echo "Log files removed"
+	find . -name "vm-*-firecracker.log" -type f -delete; \
+	find . -name "vm-*.out.log" -type f -delete; \
+	find . -name "vm-*.err.log" -type f -delete; \
+	echo "Log files removed"

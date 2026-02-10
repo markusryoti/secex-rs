@@ -1,4 +1,9 @@
-use std::{net::Ipv4Addr, path::PathBuf, process::Command};
+use std::{
+    fs::File,
+    net::Ipv4Addr,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 use macaddr::{MacAddr, MacAddr6};
 use orchestrator::FirecrackerConfig;
@@ -60,13 +65,19 @@ impl VmConfig {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
 
-        let child = tokio::process::Command::new("sudo")
-            .arg(&firecracker_path)
+        let stdout_file =
+            File::create(format!("{}.out.log", self.id)).expect("Failed to create stdout log file");
+        let stderr_file =
+            File::create(format!("{}.err.log", self.id)).expect("Failed to create stderr log file");
+
+        let child = tokio::process::Command::new(&firecracker_path)
             .arg("--api-sock")
             .arg(self.api_socket.to_str().unwrap())
             .arg("--enable-pci")
             .arg("--config-file")
             .arg(current_dir.join(self.config_name()))
+            .stdout(Stdio::from(stdout_file))
+            .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("Failed to start firecracker");
 
