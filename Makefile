@@ -1,5 +1,6 @@
 orchestrator:
-	cargo run --bin orchestrator
+	cargo build --bin orchestrator
+	sudo target/debug/orchestrator
 
 build-init:
 	cargo build --release --package init --target x86_64-unknown-linux-musl
@@ -13,3 +14,6 @@ kill-fc-processes:
 
 remove-fc-sockets:
 	sudo find /tmp -name "*firecracker*.socket" -exec bash -c 'echo "Removing {}"; sudo rm -f {}' \;
+
+remove-vsock-sockets:
+	sudo find /tmp -name "vsock-vm-*.sock" -exec bash -c 'echo "Removing {}"; sudo rm -f {}' \;

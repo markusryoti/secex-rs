@@ -155,6 +155,7 @@ version = "0.1.0"
 dependencies = [
  "nix 0.31.1",
  "protocol",
+ "serde_json",
  "tokio",
  "tokio-vsock",
 ]

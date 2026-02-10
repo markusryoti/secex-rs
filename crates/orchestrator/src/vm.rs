@@ -50,8 +50,8 @@ impl VmConfig {
         }
     }
 
-    pub fn initialize(&self) {
-        self.edit_vm_config();
+    pub fn initialize(&self, vsock_uds_path: &str) {
+        self.edit_vm_config(vsock_uds_path);
         self.remove_existing_socket();
         self.setup_vm_network();
     }
@@ -73,7 +73,7 @@ impl VmConfig {
         child
     }
 
-    fn edit_vm_config(&self) {
+    fn edit_vm_config(&self, vsock_uds_path: &str) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
         let mut config = FirecrackerConfig::from_file(
@@ -82,7 +82,6 @@ impl VmConfig {
         .expect("Failed to read Firecracker config file");
 
         let log_path = current_dir.join(format!("{}-firecracker.log", self.id));
-        let vsock_uds_path = format!("/tmp/vsock-{}.sock", self.id);
 
         config.fill_values(
             current_dir
@@ -99,7 +98,7 @@ impl VmConfig {
                 .join(log_path)
                 .to_str()
                 .expect("Invalid log path"),
-            &vsock_uds_path,
+            vsock_uds_path,
         );
 
         let config_file = current_dir.join(self.config_name());

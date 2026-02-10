@@ -3,11 +3,9 @@ use std::time::Duration;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-// use tokio_vsock::{VsockAddr, VsockStream};
-
-// use nix::sys::socket::{AddressFamily, SockFlag, SockType, VsockAddr, connect, socket};
-use std::os::unix::io::AsRawFd;
 use tokio_vsock::{VsockAddr, VsockStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use protocol;
 
 fn mount_drives() {
     if !Path::new("/dev/null").exists() {
@@ -67,18 +65,21 @@ async fn main() {
     // // Send data to host
     // nix::unistd::write(fd.as_raw_fd(), b"Hello from the Guest!").expect("to write");
 
-    let mut count = 10;
+    let mut count = 0;
+    const MAX_ATTEMPTS: u32 = 30;
 
     let mut stream = loop {
-        match VsockStream::connect(VsockAddr::new(2, 5000)).await {
+        // Guest (CID 3) connects to host (CID 2) on port 5001
+        // This connection gets bridged to the Unix socket /tmp/vsock-vm-1.sock
+        match VsockStream::connect(VsockAddr::new(2, 5001)).await {
             Ok(s) => break s,
             Err(_) => {
-                if count >= 10 {
-                    panic!("Failed to connect to orchestrator after multiple attempts");
+                if count >= MAX_ATTEMPTS {
+                    panic!("Failed to connect to orchestrator after {} attempts", MAX_ATTEMPTS);
                 }
                 println!(
                     "Waiting for orchestrator to be ready... ({} attempts left)",
-                    10 - count
+                    MAX_ATTEMPTS - count
                 );
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 count += 1;
@@ -87,6 +88,36 @@ async fn main() {
     };
 
     println!("Connected to orchestrator");
+    
+    // Send Hello message to orchestrator
+    let env = protocol::Envelope {
+        version: 1,
+        message: protocol::Message::Hello,
+    };
+
+    let data = serde_json::to_vec(&env).expect("Error writing message");
+    let len = (data.len() as u32).to_be_bytes();
+
+    stream
+        .write_all(&len)
+        .await
+        .expect("Failed to write length");
+    stream.write_all(&data).await.expect("Failed to write data");
+
+    println!("Sent Hello to orchestrator");
+
+    // Wait for orchestrator's response
+    let mut buffer = vec![0u8; 4];
+    match tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut buffer)).await {
+        Ok(Ok(_)) => {
+            let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+            let mut msg_buffer = vec![0u8; len];
+            stream.read_exact(&mut msg_buffer).await.expect("Failed to read message");
+            println!("Received response from orchestrator");
+        }
+        Ok(Err(e)) => eprintln!("Error reading orchestrator response: {}", e),
+        Err(_) => eprintln!("Timeout waiting for orchestrator response"),
+    }
 
     loop {
         let msg = protocol::recv_msg::<protocol::Envelope>(&mut stream)
