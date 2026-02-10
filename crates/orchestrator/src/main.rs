@@ -45,22 +45,53 @@ async fn main() {
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     let mut stream = loop {
-        match UnixStream::connect(&vsock_uds_path).await {
-            Ok(s) => break s,
+        let mut s = match UnixStream::connect(&vsock_uds_path).await {
+            Ok(s) => s,
             Err(e) => {
-                // Log the error to see if it's "Connection Refused" (normal while booting)
-                // or something else.
+                println!("Failed to connect to vsock UDS: {}", e);
                 tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
             }
+        };
+
+        // Send the handshake immediately
+        if let Err(_) = s.write_all(b"CONNECT 5001\n").await {
+            continue;
         }
+
+        // Read response - if we get "OK", we are truly connected to the guest
+        let mut buf = [0u8; 32];
+        match s.read(&mut buf).await {
+            Ok(n) if n > 0 => {
+                let resp = String::from_utf8_lossy(&buf[..n]);
+                if resp.contains("OK") {
+                    println!("Guest is ready and handshake successful!");
+                    break s;
+                }
+            }
+            _ => {}
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    println!("Connection established with Firecracker proxy!");
+    // let mut stream = loop {
+    //     match UnixStream::connect(&vsock_uds_path).await {
+    //         Ok(s) => break s,
+    //         Err(e) => {
+    //             // Log the error to see if it's "Connection Refused" (normal while booting)
+    //             // or something else.
+    //             println!("Failed to connect to vsock UDS: {}", e);
+    //             tokio::time::sleep(Duration::from_millis(100)).await;
+    //         }
+    //     }
+    // };
 
-    // 3. MANDATORY HANDSHAKE: Tell Firecracker which guest port to connect to
-    // Firecracker listens on the UDS but needs to know where to route the traffic
-    let handshake = "CONNECT 5001\n";
-    stream.write_all(handshake.as_bytes()).await.unwrap();
+    // println!("Connection established with Firecracker proxy!");
+
+    // // 3. MANDATORY HANDSHAKE: Tell Firecracker which guest port to connect to
+    // // Firecracker listens on the UDS but needs to know where to route the traffic
+    // let handshake = "CONNECT 5001\n";
+    // stream.write_all(handshake.as_bytes()).await.unwrap();
 
     // 4. Read the response from Firecracker (e.g., "OK 5001\n")
     let mut response = [0u8; 32];

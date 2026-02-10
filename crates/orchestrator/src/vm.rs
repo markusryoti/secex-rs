@@ -56,11 +56,11 @@ impl VmConfig {
         self.setup_vm_network();
     }
 
-    pub fn launch(&self) -> std::process::Child {
+    pub fn launch(&self) -> tokio::process::Child {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
 
-        let child = Command::new("sudo")
+        let child = tokio::process::Command::new("sudo")
             .arg(&firecracker_path)
             .arg("--api-sock")
             .arg(self.api_socket.to_str().unwrap())
