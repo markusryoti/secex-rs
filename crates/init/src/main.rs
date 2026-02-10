@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio_vsock::{VsockAddr, VsockStream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use protocol;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_vsock::{VsockAddr, VsockStream};
 
 fn mount_drives() {
     if !Path::new("/dev/null").exists() {
@@ -81,11 +81,15 @@ async fn main() {
             Err(e) => {
                 if count >= MAX_ATTEMPTS {
                     eprintln!("Error on last attempt: {}", e);
-                    panic!("Failed to connect to orchestrator after {} attempts", MAX_ATTEMPTS);
+                    panic!(
+                        "Failed to connect to orchestrator after {} attempts",
+                        MAX_ATTEMPTS
+                    );
                 }
                 println!(
                     "Connection attempt {} failed: {}. Retrying... ({} attempts left)",
-                    count + 1, e,
+                    count + 1,
+                    e,
                     MAX_ATTEMPTS - count
                 );
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -95,7 +99,7 @@ async fn main() {
     };
 
     println!("Connected to orchestrator");
-    
+
     // Send Hello message to orchestrator
     let env = protocol::Envelope {
         version: 1,
@@ -119,7 +123,10 @@ async fn main() {
         Ok(Ok(_)) => {
             let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
             let mut msg_buffer = vec![0u8; len];
-            stream.read_exact(&mut msg_buffer).await.expect("Failed to read message");
+            stream
+                .read_exact(&mut msg_buffer)
+                .await
+                .expect("Failed to read message");
             println!("Received response from orchestrator");
         }
         Ok(Err(e)) => eprintln!("Error reading orchestrator response: {}", e),

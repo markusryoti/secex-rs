@@ -24,9 +24,12 @@ async fn main() {
     let _child = vm.launch();
 
     println!("Firecracker started");
-    
+
     // The vsock device bridges connections from the guest (CID 3) to this Unix socket
-    println!("Connecting to guest via Unix socket at {}...", vsock_uds_path);
+    println!(
+        "Connecting to guest via Unix socket at {}...",
+        vsock_uds_path
+    );
 
     // Wait for the vsock socket to be created by Firecracker
     let mut attempts = 0;
@@ -36,7 +39,10 @@ async fn main() {
             Ok(s) => break s,
             Err(_) => {
                 if attempts >= MAX_ATTEMPTS {
-                    panic!("Failed to connect to vsock Unix socket after {} attempts", MAX_ATTEMPTS);
+                    panic!(
+                        "Failed to connect to vsock Unix socket after {} attempts",
+                        MAX_ATTEMPTS
+                    );
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 attempts += 1;
@@ -56,7 +62,10 @@ async fn main() {
         Ok(Ok(_)) => {
             let len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
             let mut msg_buffer = vec![0u8; len];
-            stream.read_exact(&mut msg_buffer).await.expect("Failed to read message");
+            stream
+                .read_exact(&mut msg_buffer)
+                .await
+                .expect("Failed to read message");
             println!("Received message from guest");
         }
         Ok(Err(e)) => eprintln!("Error reading guest message: {}", e),
