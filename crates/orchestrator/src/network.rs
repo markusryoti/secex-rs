@@ -1,15 +1,13 @@
 use std::process::Command;
 
-pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr) {
-    let tap_dev = "tap0";
-
-    Command::new("sudo")
+pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr, tap_dev: &str) {
+    // Try to delete the TAP device, but don't panic if it doesn't exist
+    let _ = Command::new("sudo")
         .arg("ip")
         .arg("link")
         .arg("del")
         .arg(tap_dev)
-        .status()
-        .expect("Failed to delete existing TAP device");
+        .status();
 
     Command::new("sudo")
         .arg("ip")

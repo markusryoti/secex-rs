@@ -82,6 +82,7 @@ impl VmConfig {
         .expect("Failed to read Firecracker config file");
 
         let log_path = current_dir.join(format!("{}-firecracker.log", self.id));
+        let vsock_uds_path = format!("/tmp/vsock-{}.sock", self.id);
 
         config.fill_values(
             current_dir
@@ -98,6 +99,7 @@ impl VmConfig {
                 .join(log_path)
                 .to_str()
                 .expect("Invalid log path"),
+            &vsock_uds_path,
         );
 
         let config_file = current_dir.join(self.config_name());
@@ -125,7 +127,7 @@ impl VmConfig {
     }
 
     fn setup_vm_network(&self) {
-        network::set_network_interface(&self.host_ip);
+        network::set_network_interface(&self.host_ip, &self.tap);
         println!("Set up VM network with TAP device at {}", self.host_ip);
     }
 }

@@ -7,3 +7,9 @@ build-init:
 
 build-rootfs:
 	tools/build-rootfs-image.sh
+
+kill-fc-processes:
+	pkill -f firecracker || true
+
+remove-fc-sockets:
+	sudo find /tmp -name "*firecracker*.socket" -exec bash -c 'echo "Removing {}"; sudo rm -f {}' \;

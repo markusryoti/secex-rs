@@ -1,8 +1,12 @@
 use std::path::Path;
+use std::time::Duration;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio::net::UnixStream;
+// use tokio_vsock::{VsockAddr, VsockStream};
+
+// use nix::sys::socket::{AddressFamily, SockFlag, SockType, VsockAddr, connect, socket};
+use std::os::unix::io::AsRawFd;
 use tokio_vsock::{VsockAddr, VsockStream};
 
 fn mount_drives() {
@@ -45,9 +49,42 @@ async fn main() {
 
     println!("Mounts complete. Entering main loop.");
 
-    let mut stream = VsockStream::connect(VsockAddr::new(2, 5000))
-        .await
-        .expect("Failed to connect to orchestrator vsock");
+    // let fd = socket(
+    //     AddressFamily::Vsock,
+    //     SockType::Stream,
+    //     SockFlag::empty(),
+    //     None,
+    // )
+    // .expect("Create fd");
+
+    // // CID 2 is always the Host. Port 1234 (or whatever you choose).
+    // let addr = VsockAddr::new(2, 1234);
+
+    // println!("Guest connecting to host...");
+    // connect(fd.as_raw_fd(), &addr).expect("connect");
+    // println!("Connected!");
+
+    // // Send data to host
+    // nix::unistd::write(fd.as_raw_fd(), b"Hello from the Guest!").expect("to write");
+
+    let mut count = 10;
+
+    let mut stream = loop {
+        match VsockStream::connect(VsockAddr::new(2, 5000)).await {
+            Ok(s) => break s,
+            Err(_) => {
+                if count >= 10 {
+                    panic!("Failed to connect to orchestrator after multiple attempts");
+                }
+                println!(
+                    "Waiting for orchestrator to be ready... ({} attempts left)",
+                    10 - count
+                );
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                count += 1;
+            }
+        }
+    };
 
     println!("Connected to orchestrator");
 

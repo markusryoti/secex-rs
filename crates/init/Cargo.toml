@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nix = { version = "0.31.1", features = ["mount", "fs", "reboot"] }
+nix = { version = "0.31.1", features = ["mount", "fs", "reboot", "socket"] }
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-vsock = "0.7.2"
 protocol = { path = "../protocol" }

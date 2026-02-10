@@ -88,6 +88,7 @@ impl FirecrackerConfig {
         tap_name: &str,
         mac_address: &str,
         log_path: &str,
+        vsock_uds_path: &str,
     ) {
         self.boot_source.kernel_image_path = kernel_image_path.to_string();
         if let Some(drive) = self.drives.get_mut(0) {
@@ -98,5 +99,6 @@ impl FirecrackerConfig {
             net_iface.guest_mac = mac_address.to_string();
         }
         self.logger.log_path = log_path.to_string();
+        self.vsock["uds_path"] = serde_json::json!(vsock_uds_path);
     }
 }

@@ -34,9 +34,9 @@
     }
   ],
   "vsock": {
-    "vsock_id": "vsock3",
-    "guest_cid": 2,
-    "uds_path": "/tmp/vsock3.sock"
+    "vsock_id": "vsock",
+    "guest_cid": 3,
+    "uds_path": "/tmp/vsock-vm-${VM_ID}.sock"
   },
   "logger": {
     "log_path": "${LOG_PATH}",
