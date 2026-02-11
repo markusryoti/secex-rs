@@ -4,6 +4,7 @@ use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_vsock::{VsockAddr, VsockListener};
+use tracing::info;
 
 fn mount_drives() {
     if !Path::new("/dev/null").exists() {
@@ -47,22 +48,32 @@ fn shutdown_actions() {
 
 #[tokio::main]
 async fn main() {
-    println!("Init started. Checking mounts...");
+    tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_file(false)
+        .with_line_number(false)
+        .without_time()
+        .init();
+
+    info!("Init started. Checking mounts...");
 
     mount_drives();
 
-    println!("Mounts complete. Entering main loop.");
+    info!("Mounts complete. Entering main loop.");
 
     if !std::path::Path::new("/dev/vsock").exists() {
-        println!("ERROR: /dev/vsock does not exist! Make sure the driver is loaded.");
+        info!("ERROR: /dev/vsock does not exist! Make sure the driver is loaded.");
     }
 
-    println!("Init started. Listening on cid 3, port 5001...");
+    info!("Init started. Listening on cid 3, port 5001...");
 
     let listener = match VsockListener::bind(VsockAddr::new(3, 5001)) {
         Ok(l) => l,
         Err(e) => {
-            println!("Failed to bind vsock listener: {}", e);
+            info!("Failed to bind vsock listener: {}", e);
             shutdown_actions();
             return;
         }
@@ -71,18 +82,18 @@ async fn main() {
     let (mut stream, addr) = match listener.accept().await {
         Ok((s, a)) => (s, a),
         Err(e) => {
-            println!("Failed to accept vsock connection: {}", e);
+            info!("Failed to accept vsock connection: {}", e);
             shutdown_actions();
             return;
         }
     };
 
-    println!("Connection accepted from {:?}", addr);
+    info!("Connection accepted from {:?}", addr);
 
     loop {
         let mut len_buf = [0u8; 4];
         if let Err(_) = stream.read_exact(&mut len_buf).await {
-            println!("Connection closed by host.");
+            info!("Connection closed by host.");
             break;
         }
         let len = u32::from_be_bytes(len_buf) as usize;
@@ -98,7 +109,7 @@ async fn main() {
 
         match envelope.message {
             protocol::Message::Hello => {
-                println!("Orchestrator said Hello! Sending response...");
+                info!("Orchestrator said Hello! Sending response...");
 
                 let response = protocol::Envelope {
                     version: 1,
@@ -114,7 +125,7 @@ async fn main() {
                 stream.flush().await.unwrap();
             }
             protocol::Message::RunCommand(cmd) => {
-                println!("Received RunCommand: {}", cmd.command);
+                info!("Received RunCommand: {}", cmd.command);
 
                 let out = tokio::process::Command::new(&cmd.command)
                     .args(&cmd.args)
@@ -128,10 +139,10 @@ async fn main() {
                     .await
                     .expect("Failed to wait on command");
 
-                println!("Command exited with status: {}", out.status);
+                info!("Command exited with status: {}", out.status);
 
                 let stdout_str = String::from_utf8_lossy(&out.stdout);
-                println!("Command stdout: {}", stdout_str);
+                info!("Command stdout: {}", stdout_str);
 
                 let response = protocol::Envelope {
                     version: 1,
@@ -147,10 +158,10 @@ async fn main() {
                 stream.write_all(&resp_data).await.unwrap();
             }
             protocol::Message::Shutdown => {
-                println!("Shutting down guest...");
+                info!("Shutting down guest...");
                 break;
             }
-            _ => println!("Received other message"),
+            _ => info!("Received other message"),
         }
     }
 
