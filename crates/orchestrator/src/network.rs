@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use tracing::info;
+
 pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr, tap_dev: &str) {
     // Try to delete the TAP device, but don't panic if it doesn't exist
     let _ = Command::new("sudo")
@@ -70,7 +72,7 @@ pub fn set_network_interface(tap_ip: &std::net::Ipv4Addr, tap_dev: &str) {
         .as_str()
         .expect("Failed to get host interface name");
 
-    println!("Host interface for NAT: {}", host_iface);
+    info!("Host interface for NAT: {}", host_iface);
 
     Command::new("sudo")
         .arg("iptables")

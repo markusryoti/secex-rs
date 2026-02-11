@@ -7,6 +7,7 @@ use std::{
 
 use macaddr::{MacAddr, MacAddr6};
 use orchestrator::FirecrackerConfig;
+use tracing::info;
 
 use crate::network;
 
@@ -34,8 +35,8 @@ impl VmStore {
 
 pub struct VmConfig {
     pub id: String,
-    api_socket: PathBuf,
-    tap: String,
+    pub api_socket: PathBuf,
+    pub tap: String,
     host_ip: Ipv4Addr,
     mac: MacAddr,
 }
@@ -118,7 +119,7 @@ impl VmConfig {
             .to_file(&config_file)
             .expect("Failed to write Firecracker config file");
 
-        println!("Wrote Firecracker config to {}", config_file.display());
+        info!("Wrote Firecracker config to {}", config_file.display());
     }
 
     fn config_name(&self) -> String {
@@ -133,11 +134,11 @@ impl VmConfig {
             .status()
             .expect("Failed to remove socket with sudo");
 
-        println!("Removed existing socket at {}", self.api_socket.display());
+        info!("Removed existing socket at {}", self.api_socket.display());
     }
 
     fn setup_vm_network(&self) {
         network::set_network_interface(&self.host_ip, &self.tap);
-        println!("Set up VM network with TAP device at {}", self.host_ip);
+        info!("Set up VM network with TAP device at {}", self.host_ip);
     }
 }

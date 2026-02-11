@@ -1,6 +1,7 @@
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use tracing::info;
 
 mod network;
 mod vm;
@@ -10,14 +11,14 @@ async fn wait_for_socket(vsock_uds_path: &str) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    println!(
+    info!(
         "Unix socket {} is now available. Attempting to connect...",
         vsock_uds_path
     );
 }
 
 async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
-    println!(
+    info!(
         "Connecting to guest via Unix socket at {}...",
         vsock_uds_path
     );
@@ -26,7 +27,7 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
         let mut s = match UnixStream::connect(vsock_uds_path).await {
             Ok(s) => s,
             Err(e) => {
-                println!("Failed to connect to vsock UDS: {}", e);
+                tracing::error!("Failed to connect to vsock UDS: {}", e);
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
@@ -43,7 +44,7 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
             Ok(n) if n > 0 => {
                 let resp = String::from_utf8_lossy(&buf[..n]);
                 if resp.contains("OK") {
-                    println!("Guest is ready and handshake successful!");
+                    info!("Guest is ready and handshake successful!");
                     break s;
                 }
             }
@@ -52,7 +53,7 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    println!("Vsock circuit established to guest port 5001!");
+    info!("Vsock circuit established to guest port 5001!");
 
     stream
 }
@@ -62,7 +63,7 @@ async fn send_hello(stream: &mut UnixStream) {
         .await
         .unwrap();
 
-    println!("Sent Hello message to guest");
+    info!("Sent Hello message to guest");
 }
 
 async fn send_command(stream: &mut UnixStream) {
@@ -77,7 +78,7 @@ async fn send_command(stream: &mut UnixStream) {
         .await
         .unwrap();
 
-    println!("Sent RunCommand message to guest");
+    info!("Sent RunCommand message to guest");
 }
 
 async fn handle_incoming(stream: &mut UnixStream) {
@@ -88,13 +89,13 @@ async fn handle_incoming(stream: &mut UnixStream) {
 
         match message {
             protocol::Message::Hello => {
-                println!("Guest said Hello!");
+                info!("Guest said Hello!");
             }
             protocol::Message::CommandOutput(output) => {
-                println!("Received command output from guest: {}", output.output);
+                info!("Received command output from guest: {}", output.output);
                 break;
             }
-            _ => println!("Received other message"),
+            _ => info!("Received other message"),
         }
     }
 }
@@ -104,11 +105,13 @@ async fn send_shutdown(stream: &mut UnixStream) {
         .await
         .unwrap();
 
-    println!("Sent Shutdown message to guest, closing connection...");
+    info!("Sent Shutdown message to guest, closing connection...");
 }
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let store = &mut vm::VmStore::new();
 
     let vm = vm::VmConfig::new(store.len() + 1);
@@ -126,7 +129,10 @@ async fn main() {
     vm.initialize(&vsock_uds_path);
     let _child = vm.launch();
 
-    println!("Firecracker started");
+    info!(
+        "VM {} launched with API socket at {:?} and TAP device {}",
+        vm.id, vm.api_socket, vm.tap
+    );
 
     wait_for_socket(&vsock_uds_path).await;
 
@@ -136,6 +142,6 @@ async fn main() {
     send_command(&mut stream).await;
     handle_incoming(&mut stream).await;
 
-    println!("Initiating shutdown sequence...");
+    info!("Initiating shutdown sequence...");
     send_shutdown(&mut stream).await;
 }
