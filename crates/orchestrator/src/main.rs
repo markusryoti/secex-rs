@@ -75,6 +75,30 @@ async fn send_hello(stream: &mut UnixStream) {
     println!("Sent Hello message to guest");
 }
 
+async fn send_command(stream: &mut UnixStream) {
+    let cmd = protocol::RunCommand {
+        command: "echo".to_string(),
+        args: vec!["Hello from orchestrator!".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    let env = protocol::Envelope {
+        version: 1,
+        message: protocol::Message::RunCommand(cmd),
+    };
+
+    let data = serde_json::to_vec(&env).unwrap();
+
+    stream
+        .write_all(&(data.len() as u32).to_be_bytes())
+        .await
+        .unwrap();
+    stream.write_all(&data).await.unwrap();
+
+    println!("Sent RunCommand message to guest");
+}
+
 async fn handle_incoming(stream: &mut UnixStream) {
     loop {
         let mut len_buf = [0u8; 4];
@@ -96,6 +120,9 @@ async fn handle_incoming(stream: &mut UnixStream) {
         match envelope.message {
             protocol::Message::Hello => {
                 println!("Guest said Hello!");
+            }
+            protocol::Message::CommandOutput(output) => {
+                println!("Received command output from guest: {}", output.output);
                 break;
             }
             _ => println!("Received other message"),
@@ -145,6 +172,7 @@ async fn main() {
     let mut stream = connect_to_vsock(&vsock_uds_path).await;
 
     send_hello(&mut stream).await;
+    send_command(&mut stream).await;
     handle_incoming(&mut stream).await;
 
     println!("Initiating shutdown sequence...");

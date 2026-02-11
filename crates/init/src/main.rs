@@ -113,6 +113,39 @@ async fn main() {
                 stream.write_all(&resp_data).await.unwrap();
                 stream.flush().await.unwrap();
             }
+            protocol::Message::RunCommand(cmd) => {
+                println!("Received RunCommand: {}", cmd.command);
+
+                let out = tokio::process::Command::new(&cmd.command)
+                    .args(&cmd.args)
+                    .envs(&cmd.env)
+                    .current_dir(cmd.working_dir.unwrap_or_else(|| "/".to_string()))
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("Failed to spawn command")
+                    .wait_with_output()
+                    .await
+                    .expect("Failed to wait on command");
+
+                println!("Command exited with status: {}", out.status);
+
+                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                println!("Command stdout: {}", stdout_str);
+
+                let response = protocol::Envelope {
+                    version: 1,
+                    message: protocol::Message::CommandOutput(protocol::CommandOutput {
+                        output: stdout_str.to_string(),
+                    }),
+                };
+                let resp_data = serde_json::to_vec(&response).unwrap();
+                stream
+                    .write_all(&(resp_data.len() as u32).to_be_bytes())
+                    .await
+                    .unwrap();
+                stream.write_all(&resp_data).await.unwrap();
+            }
             protocol::Message::Shutdown => {
                 println!("Shutting down guest...");
                 break;

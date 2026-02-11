@@ -15,17 +15,23 @@ pub struct Envelope {
 pub enum Message {
     Hello,
     RunCommand(RunCommand),
-    Stdout(StreamChunk),
-    Stderr(StreamChunk),
+    CommandOutput(CommandOutput),
+    // Stdout(StreamChunk),
+    // Stderr(StreamChunk),
     Exit(ExitStatus),
     Cancel(Cancel),
     Shutdown,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CommandOutput {
+    pub output: String,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RunCommand {
-    pub id: String,
-    pub command: Vec<String>,
+    pub command: String,
+    pub args: Vec<String>,
     pub env: HashMap<String, String>,
     pub working_dir: Option<String>,
 }
