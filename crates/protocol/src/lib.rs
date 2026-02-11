@@ -1,9 +1,6 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-};
-
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Serialize, Deserialize)]
 pub struct Envelope {
@@ -64,29 +61,39 @@ pub struct Cancel {
     pub id: String,
 }
 
-pub fn send_msg<T: Serialize>(
-    stream: &mut impl Write,
-    msg: &T,
+pub async fn send_msg(
+    stream: &mut (impl AsyncWriteExt + std::marker::Unpin),
+    msg: Message,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let data = serde_json::to_vec(msg)?;
-    let len = (data.len() as u32).to_be_bytes();
+    let env = Envelope {
+        version: 1,
+        message: msg,
+    };
 
-    stream.write_all(&len)?;
-    stream.write_all(&data)?;
+    let data = serde_json::to_vec(&env).unwrap();
+
+    stream
+        .write_all(&(data.len() as u32).to_be_bytes())
+        .await
+        .unwrap();
+    stream.write_all(&data).await.unwrap();
 
     Ok(())
 }
 
-pub fn recv_msg<T: DeserializeOwned>(
-    stream: &mut impl Read,
-) -> Result<T, Box<dyn std::error::Error>> {
+pub async fn recv_msg(
+    stream: &mut (impl AsyncReadExt + std::marker::Unpin),
+) -> Result<Message, Box<dyn std::error::Error>> {
     let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf)?;
+    stream.read_exact(&mut len_buf).await?;
 
     let len = u32::from_be_bytes(len_buf) as usize;
-    let mut buf = vec![0; len];
+    let mut msg_buf = vec![0u8; len];
 
-    stream.read_exact(&mut buf)?;
+    stream.read_exact(&mut msg_buf).await?;
 
-    Ok(serde_json::from_slice(&buf)?)
+    let envelope: Envelope =
+        serde_json::from_slice(&msg_buf).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    Ok(envelope.message)
 }

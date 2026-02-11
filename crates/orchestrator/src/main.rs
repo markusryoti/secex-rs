@@ -1,4 +1,3 @@
-use protocol;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -59,18 +58,9 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
 }
 
 async fn send_hello(stream: &mut UnixStream) {
-    let env = protocol::Envelope {
-        version: 1,
-        message: protocol::Message::Hello,
-    };
-
-    let data = serde_json::to_vec(&env).unwrap();
-
-    stream
-        .write_all(&(data.len() as u32).to_be_bytes())
+    protocol::send_msg(stream, protocol::Message::Hello)
         .await
         .unwrap();
-    stream.write_all(&data).await.unwrap();
 
     println!("Sent Hello message to guest");
 }
@@ -83,41 +73,20 @@ async fn send_command(stream: &mut UnixStream) {
         working_dir: None,
     };
 
-    let env = protocol::Envelope {
-        version: 1,
-        message: protocol::Message::RunCommand(cmd),
-    };
-
-    let data = serde_json::to_vec(&env).unwrap();
-
-    stream
-        .write_all(&(data.len() as u32).to_be_bytes())
+    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
         .await
         .unwrap();
-    stream.write_all(&data).await.unwrap();
 
     println!("Sent RunCommand message to guest");
 }
 
 async fn handle_incoming(stream: &mut UnixStream) {
     loop {
-        let mut len_buf = [0u8; 4];
-        if let Err(_) = stream.read_exact(&mut len_buf).await {
-            println!("Connection closed by host.");
-            break;
-        }
-        let len = u32::from_be_bytes(len_buf) as usize;
-
-        let mut msg_buf = vec![0u8; len];
-        stream
-            .read_exact(&mut msg_buf)
+        let message = protocol::recv_msg(stream)
             .await
-            .expect("Failed to read message body");
+            .expect("Failed to receive message");
 
-        let envelope: protocol::Envelope =
-            serde_json::from_slice(&msg_buf).expect("Failed to parse JSON");
-
-        match envelope.message {
+        match message {
             protocol::Message::Hello => {
                 println!("Guest said Hello!");
             }
@@ -131,17 +100,9 @@ async fn handle_incoming(stream: &mut UnixStream) {
 }
 
 async fn send_shutdown(stream: &mut UnixStream) {
-    let shutdown_msg = protocol::Envelope {
-        version: 1,
-        message: protocol::Message::Shutdown,
-    };
-
-    let shutdown_data = serde_json::to_vec(&shutdown_msg).unwrap();
-    stream
-        .write_all(&(shutdown_data.len() as u32).to_be_bytes())
+    protocol::send_msg(stream, protocol::Message::Shutdown)
         .await
         .unwrap();
-    stream.write_all(&shutdown_data).await.unwrap();
 
     println!("Sent Shutdown message to guest, closing connection...");
 }
