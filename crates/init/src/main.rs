@@ -2,7 +2,6 @@ use std::path::Path;
 
 use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_vsock::{VsockAddr, VsockListener};
 use tracing::info;
 
@@ -91,38 +90,30 @@ async fn main() {
     info!("Connection accepted from {:?}", addr);
 
     loop {
-        let mut len_buf = [0u8; 4];
-        if let Err(_) = stream.read_exact(&mut len_buf).await {
-            info!("Connection closed by host.");
-            break;
-        }
-        let len = u32::from_be_bytes(len_buf) as usize;
-
-        let mut msg_buf = vec![0u8; len];
-        stream
-            .read_exact(&mut msg_buf)
+        let message = protocol::recv_msg(&mut stream)
             .await
-            .expect("Failed to read message body");
+            .expect("Failed to receive message");
 
-        let envelope: protocol::Envelope =
-            serde_json::from_slice(&msg_buf).expect("Failed to parse JSON");
-
-        match envelope.message {
+        match message {
             protocol::Message::Hello => {
                 info!("Orchestrator said Hello! Sending response...");
 
-                let response = protocol::Envelope {
-                    version: 1,
-                    message: protocol::Message::Hello, // Or a 'Ready' variant
-                };
-                let resp_data = serde_json::to_vec(&response).unwrap();
+                // let response = protocol::Envelope {
+                //     version: 1,
+                //     message: protocol::Message::Hello,
+                // };
+                // let resp_data = serde_json::to_vec(&response).unwrap();
 
-                stream
-                    .write_all(&(resp_data.len() as u32).to_be_bytes())
+                // stream
+                //     .write_all(&(resp_data.len() as u32).to_be_bytes())
+                //     .await
+                //     .unwrap();
+                // stream.write_all(&resp_data).await.unwrap();
+                // stream.flush().await.unwrap();
+
+                protocol::send_msg(&mut stream, protocol::Message::Hello)
                     .await
                     .unwrap();
-                stream.write_all(&resp_data).await.unwrap();
-                stream.flush().await.unwrap();
             }
             protocol::Message::RunCommand(cmd) => {
                 info!("Received RunCommand: {}", cmd.command);
@@ -142,20 +133,17 @@ async fn main() {
                 info!("Command exited with status: {}", out.status);
 
                 let stdout_str = String::from_utf8_lossy(&out.stdout);
+
                 info!("Command stdout: {}", stdout_str);
 
-                let response = protocol::Envelope {
-                    version: 1,
-                    message: protocol::Message::CommandOutput(protocol::CommandOutput {
+                protocol::send_msg(
+                    &mut stream,
+                    protocol::Message::CommandOutput(protocol::CommandOutput {
                         output: stdout_str.to_string(),
                     }),
-                };
-                let resp_data = serde_json::to_vec(&response).unwrap();
-                stream
-                    .write_all(&(resp_data.len() as u32).to_be_bytes())
-                    .await
-                    .unwrap();
-                stream.write_all(&resp_data).await.unwrap();
+                )
+                .await
+                .unwrap();
             }
             protocol::Message::Shutdown => {
                 info!("Shutting down guest...");
