@@ -95,7 +95,7 @@ async fn handle_incoming(stream: &mut UnixStream) {
                 info!("Received command output from guest: {}", output.output);
                 break;
             }
-            _ => info!("Received other message"),
+            m => info!("Received other message: {:?}", m),
         }
     }
 }
@@ -114,8 +114,15 @@ async fn main() {
 
     let store = &mut vm::VmStore::new();
 
+    info!("Created VM store");
+
     let vm = vm::VmConfig::new(store.len() + 1);
     let vm_id = vm.id.clone();
+
+    info!(
+        "Created VM configuration for {}. Setting up network interface...",
+        vm.id
+    );
 
     store.add_vm(vm);
 
@@ -124,7 +131,13 @@ async fn main() {
         .expect("Failed to retrieve VM configuration");
 
     let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm_id);
-    let _ = std::fs::remove_file(&vsock_uds_path);
+    match std::fs::remove_file(&vsock_uds_path) {
+        Ok(_) => info!("Removed existing vsock UDS at {}", vsock_uds_path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!("No existing vsock UDS at {}, proceeding...", vsock_uds_path)
+        }
+        Err(e) => panic!("Failed to remove existing vsock UDS: {}", e),
+    }
 
     vm.initialize(&vsock_uds_path);
     let _child = vm.launch();
