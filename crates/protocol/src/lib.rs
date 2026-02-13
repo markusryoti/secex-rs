@@ -1,3 +1,5 @@
+pub mod tar;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

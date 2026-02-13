@@ -98,19 +98,6 @@ async fn main() {
             protocol::Message::Hello => {
                 info!("Orchestrator said Hello! Sending response...");
 
-                // let response = protocol::Envelope {
-                //     version: 1,
-                //     message: protocol::Message::Hello,
-                // };
-                // let resp_data = serde_json::to_vec(&response).unwrap();
-
-                // stream
-                //     .write_all(&(resp_data.len() as u32).to_be_bytes())
-                //     .await
-                //     .unwrap();
-                // stream.write_all(&resp_data).await.unwrap();
-                // stream.flush().await.unwrap();
-
                 protocol::send_msg(&mut stream, protocol::Message::Hello)
                     .await
                     .unwrap();
