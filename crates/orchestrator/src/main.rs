@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
-use tracing::info;
+use tracing::{debug, error, info};
 
 mod network;
 mod vm;
@@ -66,9 +66,12 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
 
     let stream = loop {
         let mut s = match UnixStream::connect(vsock_uds_path).await {
-            Ok(s) => s,
+            Ok(s) => {
+                debug!("Successfully connected to vsock UDS at {}", vsock_uds_path);
+                s
+            }
             Err(e) => {
-                tracing::error!("Failed to connect to vsock UDS: {}", e);
+                error!("Failed to connect to vsock UDS: {}", e);
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
@@ -89,12 +92,19 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
                     break s;
                 }
             }
-            _ => {}
+            Err(err) => {
+                error!("Error during handshake: {}", err);
+                continue;
+            }
+            Ok(_) => {
+                debug!("Received empty response during handshake");
+                continue;
+            }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    info!("Vsock circuit established to guest port 5001!");
+    info!("Connected to guest via vsock UDS at {}", vsock_uds_path);
 
     stream
 }
