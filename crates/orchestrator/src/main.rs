@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -5,6 +6,36 @@ use tracing::info;
 
 mod network;
 mod vm;
+
+async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
+    let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm.id);
+
+    remove_existing_vsock(&vsock_uds_path);
+
+    vm.initialize(&vsock_uds_path);
+    let _child = vm.launch();
+
+    info!(
+        "VM {} launched with API socket at {:?} and TAP device {}",
+        vm.id, vm.api_socket, vm.tap
+    );
+
+    wait_for_socket(&vsock_uds_path).await;
+
+    let stream = connect_to_vsock(&vsock_uds_path).await;
+    let (reader, mut writer) = stream.into_split();
+
+    let handle = tokio::spawn(async {
+        handle_incoming(reader).await;
+    });
+
+    initial_commands(&mut writer).await;
+
+    handle.await.unwrap();
+
+    info!("Initiating shutdown sequence...");
+    send_shutdown(&mut writer).await;
+}
 
 async fn wait_for_socket(vsock_uds_path: &str) {
     while !std::path::Path::new(&vsock_uds_path).exists() {
@@ -15,6 +46,16 @@ async fn wait_for_socket(vsock_uds_path: &str) {
         "Unix socket {} is now available. Attempting to connect...",
         vsock_uds_path
     );
+}
+
+fn remove_existing_vsock(vsock_uds_path: &str) {
+    match std::fs::remove_file(&vsock_uds_path) {
+        Ok(_) => info!("Removed existing vsock UDS at {}", vsock_uds_path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            info!("No existing vsock UDS at {}, proceeding...", vsock_uds_path)
+        }
+        Err(e) => panic!("Failed to remove existing vsock UDS: {}", e),
+    }
 }
 
 async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
@@ -117,55 +158,21 @@ async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let store = &mut vm::VmStore::new();
-
+    let mut store = vm::VmStore::new();
     info!("Created VM store");
 
-    let vm = vm::VmConfig::new(store.len() + 1);
-    let vm_id = vm.id.clone();
+    let vm = Arc::new(vm::VmConfig::new(store.len() + 1));
 
     info!(
         "Created VM configuration for {}. Setting up network interface...",
         vm.id
     );
 
-    store.add_vm(vm);
+    let id = vm.id.clone();
 
-    let vm = store
-        .get(&vm_id)
-        .expect("Failed to retrieve VM configuration");
+    store.add_vm(vm.clone());
 
-    let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm_id);
-    match std::fs::remove_file(&vsock_uds_path) {
-        Ok(_) => info!("Removed existing vsock UDS at {}", vsock_uds_path),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            info!("No existing vsock UDS at {}, proceeding...", vsock_uds_path)
-        }
-        Err(e) => panic!("Failed to remove existing vsock UDS: {}", e),
-    }
+    handle_vm_lifecycle(vm).await;
 
-    vm.initialize(&vsock_uds_path);
-    let _child = vm.launch();
-
-    info!(
-        "VM {} launched with API socket at {:?} and TAP device {}",
-        vm.id, vm.api_socket, vm.tap
-    );
-
-    wait_for_socket(&vsock_uds_path).await;
-
-    let stream = connect_to_vsock(&vsock_uds_path).await;
-
-    let (reader, mut writer) = stream.into_split();
-
-    let handle = tokio::spawn(async {
-        handle_incoming(reader).await;
-    });
-
-    initial_commands(&mut writer).await;
-
-    handle.await.unwrap();
-
-    info!("Initiating shutdown sequence...");
-    send_shutdown(&mut writer).await;
+    store.remove_vm(&id);
 }

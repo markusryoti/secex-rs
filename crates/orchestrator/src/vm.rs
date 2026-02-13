@@ -3,6 +3,7 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::Arc,
 };
 
 use macaddr::{MacAddr, MacAddr6};
@@ -12,7 +13,7 @@ use tracing::info;
 use crate::network;
 
 pub struct VmStore {
-    vms: Vec<VmConfig>,
+    vms: Vec<Arc<VmConfig>>,
 }
 
 impl VmStore {
@@ -20,13 +21,17 @@ impl VmStore {
         VmStore { vms: Vec::new() }
     }
 
-    pub fn add_vm(&mut self, vm: VmConfig) {
+    pub fn add_vm(&mut self, vm: Arc<VmConfig>) {
         self.vms.push(vm);
     }
 
-    pub fn get(&self, id: &str) -> Option<&VmConfig> {
-        self.vms.iter().find(|vm| vm.id == id)
+    pub fn remove_vm(&mut self, id: &str) {
+        self.vms.retain(|vm| vm.id != id);
     }
+
+    // pub fn get(&self, id: &str) -> Option<Arc<VmConfig>> {
+    //     self.vms.iter().find(|vm| vm.id == id).cloned()
+    // }
 
     pub fn len(&self) -> usize {
         self.vms.len()
