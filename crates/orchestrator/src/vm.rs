@@ -7,9 +7,9 @@ use std::{
 };
 
 use macaddr::{MacAddr, MacAddr6};
-use orchestrator::FirecrackerConfig;
 use tracing::info;
 
+use crate::firecracker;
 use crate::network;
 
 pub struct VmStore {
@@ -93,7 +93,7 @@ impl VmConfig {
     fn edit_vm_config(&self, vsock_uds_path: &str) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
-        let mut config = FirecrackerConfig::from_file(
+        let mut config = firecracker::FirecrackerConfig::from_file(
             &current_dir.join("crates/orchestrator/vm_config_template.json"),
         )
         .expect("Failed to read Firecracker config file");

@@ -119,7 +119,7 @@ async fn main() {
 
                 info!("Command exited with status: {}", out.status);
 
-                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                let stdout_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
                 info!("Command stdout: {}", stdout_str);
 

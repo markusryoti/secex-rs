@@ -1,16 +1,16 @@
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
-use tracing::{debug, error, info};
+use tracing::info;
 
+mod firecracker;
 mod network;
 mod vm;
+mod vsock;
 
 async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
     let vsock_uds_path = format!("/tmp/vsock-{}.sock", vm.id);
 
-    remove_existing_vsock(&vsock_uds_path);
+    vsock::remove_existing_vsock(&vsock_uds_path);
 
     vm.initialize(&vsock_uds_path);
     let _child = vm.launch();
@@ -20,9 +20,9 @@ async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
         vm.id, vm.api_socket, vm.tap
     );
 
-    wait_for_socket(&vsock_uds_path).await;
+    vsock::wait_for_socket(&vsock_uds_path).await;
 
-    let stream = connect_to_vsock(&vsock_uds_path).await;
+    let stream = vsock::connect_to_vsock(&vsock_uds_path).await;
     let (reader, mut writer) = stream.into_split();
 
     let handle = tokio::spawn(async {
@@ -36,79 +36,6 @@ async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
     info!("Initiating shutdown sequence...");
     send_shutdown(&mut writer).await;
 }
-
-async fn wait_for_socket(vsock_uds_path: &str) {
-    while !std::path::Path::new(&vsock_uds_path).exists() {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    info!(
-        "Unix socket {} is now available. Attempting to connect...",
-        vsock_uds_path
-    );
-}
-
-fn remove_existing_vsock(vsock_uds_path: &str) {
-    match std::fs::remove_file(&vsock_uds_path) {
-        Ok(_) => info!("Removed existing vsock UDS at {}", vsock_uds_path),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            info!("No existing vsock UDS at {}, proceeding...", vsock_uds_path)
-        }
-        Err(e) => panic!("Failed to remove existing vsock UDS: {}", e),
-    }
-}
-
-async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
-    info!(
-        "Connecting to guest via Unix socket at {}...",
-        vsock_uds_path
-    );
-
-    let stream = loop {
-        let mut s = match UnixStream::connect(vsock_uds_path).await {
-            Ok(s) => {
-                debug!("Successfully connected to vsock UDS at {}", vsock_uds_path);
-                s
-            }
-            Err(e) => {
-                error!("Failed to connect to vsock UDS: {}", e);
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
-        };
-
-        // Send the handshake immediately
-        if let Err(_) = s.write_all(b"CONNECT 5001\n").await {
-            continue;
-        }
-
-        // Read response - if we get "OK", we are truly connected to the guest
-        let mut buf = [0u8; 32];
-        match s.read(&mut buf).await {
-            Ok(n) if n > 0 => {
-                let resp = String::from_utf8_lossy(&buf[..n]);
-                if resp.contains("OK") {
-                    info!("Guest is ready and handshake successful!");
-                    break s;
-                }
-            }
-            Err(err) => {
-                error!("Error during handshake: {}", err);
-                continue;
-            }
-            Ok(_) => {
-                debug!("Received empty response during handshake");
-                continue;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
-
-    info!("Connected to guest via vsock UDS at {}", vsock_uds_path);
-
-    stream
-}
-
 async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     protocol::send_msg(stream, protocol::Message::Hello)
         .await

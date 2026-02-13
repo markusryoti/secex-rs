@@ -15,6 +15,7 @@ pub enum Message {
     Hello,
     RunCommand(RunCommand),
     CommandOutput(CommandOutput),
+    SendFile(FileTransfer),
     Shutdown,
 }
 
@@ -22,6 +23,9 @@ pub enum Message {
 pub struct CommandOutput {
     pub output: String,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FileTransfer {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RunCommand {
