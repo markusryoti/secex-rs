@@ -36,28 +36,6 @@ async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
     info!("Initiating shutdown sequence...");
     send_shutdown(&mut writer).await;
 }
-async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    protocol::send_msg(stream, protocol::Message::Hello)
-        .await
-        .unwrap();
-
-    info!("Sent Hello message to guest");
-}
-
-async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    let cmd = protocol::RunCommand {
-        command: "echo".to_string(),
-        args: vec!["Hello from orchestrator!".to_string()],
-        env: std::collections::HashMap::new(),
-        working_dir: None,
-    };
-
-    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
-        .await
-        .unwrap();
-
-    info!("Sent RunCommand message to guest");
-}
 
 async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
     loop {
@@ -89,6 +67,44 @@ async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
 async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     send_hello(stream).await;
     send_command(stream).await;
+    send_tar_file(stream).await;
+}
+
+async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    protocol::send_msg(stream, protocol::Message::Hello)
+        .await
+        .unwrap();
+
+    info!("Sent Hello message to guest");
+}
+
+async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    let cmd = protocol::RunCommand {
+        command: "echo".to_string(),
+        args: vec!["Hello from orchestrator!".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
+        .await
+        .unwrap();
+
+    info!("Sent RunCommand message to guest");
+}
+
+async fn send_tar_file<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
+
+    let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
+
+    let file_msg = protocol::FileTransfer { data };
+
+    protocol::send_msg(stream, protocol::Message::SendFile(file_msg))
+        .await
+        .unwrap();
+
+    info!("Sent SendFile message to guest");
 }
 
 #[tokio::main]

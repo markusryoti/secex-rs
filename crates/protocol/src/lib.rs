@@ -25,7 +25,9 @@ pub struct CommandOutput {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FileTransfer {}
+pub struct FileTransfer {
+    pub data: Vec<u8>,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RunCommand {

@@ -13,3 +13,5 @@ firecracker
 
 *.log
 vm-*_config.json
+
+*.tar

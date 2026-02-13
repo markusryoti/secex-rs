@@ -132,6 +132,9 @@ async fn main() {
                 .await
                 .unwrap();
             }
+            protocol::Message::SendFile(f) => {
+                info!("Received file transfer of {} bytes", f.data.len());
+            }
             protocol::Message::Shutdown => {
                 info!("Shutting down guest...");
                 break;
