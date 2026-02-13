@@ -58,7 +58,7 @@ async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
     stream
 }
 
-async fn send_hello(stream: &mut UnixStream) {
+async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     protocol::send_msg(stream, protocol::Message::Hello)
         .await
         .unwrap();
@@ -66,7 +66,7 @@ async fn send_hello(stream: &mut UnixStream) {
     info!("Sent Hello message to guest");
 }
 
-async fn send_command(stream: &mut UnixStream) {
+async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     let cmd = protocol::RunCommand {
         command: "echo".to_string(),
         args: vec!["Hello from orchestrator!".to_string()],
@@ -81,9 +81,9 @@ async fn send_command(stream: &mut UnixStream) {
     info!("Sent RunCommand message to guest");
 }
 
-async fn handle_incoming(stream: &mut UnixStream) {
+async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
     loop {
-        let message = protocol::recv_msg(stream)
+        let message = protocol::recv_msg(&mut stream)
             .await
             .expect("Failed to receive message");
 
@@ -100,12 +100,17 @@ async fn handle_incoming(stream: &mut UnixStream) {
     }
 }
 
-async fn send_shutdown(stream: &mut UnixStream) {
+async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     protocol::send_msg(stream, protocol::Message::Shutdown)
         .await
         .unwrap();
 
     info!("Sent Shutdown message to guest, closing connection...");
+}
+
+async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    send_hello(stream).await;
+    send_command(stream).await;
 }
 
 #[tokio::main]
@@ -149,12 +154,18 @@ async fn main() {
 
     wait_for_socket(&vsock_uds_path).await;
 
-    let mut stream = connect_to_vsock(&vsock_uds_path).await;
+    let stream = connect_to_vsock(&vsock_uds_path).await;
 
-    send_hello(&mut stream).await;
-    send_command(&mut stream).await;
-    handle_incoming(&mut stream).await;
+    let (reader, mut writer) = stream.into_split();
+
+    let handle = tokio::spawn(async {
+        handle_incoming(reader).await;
+    });
+
+    initial_commands(&mut writer).await;
+
+    handle.await.unwrap();
 
     info!("Initiating shutdown sequence...");
-    send_shutdown(&mut stream).await;
+    send_shutdown(&mut writer).await;
 }
