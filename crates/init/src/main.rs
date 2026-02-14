@@ -1,41 +1,9 @@
-use std::path::Path;
-
-use nix::mount::{MsFlags, mount};
 use nix::sys::reboot::{RebootMode, reboot};
 use tokio_vsock::{VsockAddr, VsockListener};
 use tracing::info;
 
-fn mount_drives() {
-    if !Path::new("/dev/null").exists() {
-        match mount(
-            Some("devtmpfs"),
-            "/dev",
-            Some("devtmpfs"),
-            MsFlags::empty(),
-            None::<&str>,
-        ) {
-            Ok(_) => println!("Mounted devtmpfs"),
-            Err(e) if e == nix::errno::Errno::EBUSY => println!("/dev already mounted"),
-            Err(e) => panic!("Failed to mount /dev: {}", e),
-        }
-    }
-
-    let _ = mount(
-        Some("proc"),
-        "/proc",
-        Some("proc"),
-        MsFlags::empty(),
-        None::<&str>,
-    );
-
-    let _ = mount(
-        Some("sysfs"),
-        "/sys",
-        Some("sysfs"),
-        MsFlags::empty(),
-        None::<&str>,
-    );
-}
+mod messaging;
+mod mounts;
 
 fn shutdown_actions() {
     // Flush all file system buffers to ensure data integrity before rebooting
@@ -59,7 +27,7 @@ async fn main() {
 
     info!("Init started. Checking mounts...");
 
-    mount_drives();
+    mounts::mount_drives();
 
     info!("Mounts complete. Entering main loop.");
 
@@ -89,59 +57,7 @@ async fn main() {
 
     info!("Connection accepted from {:?}", addr);
 
-    loop {
-        let message = protocol::recv_msg(&mut stream)
-            .await
-            .expect("Failed to receive message");
-
-        match message {
-            protocol::Message::Hello => {
-                info!("Orchestrator said Hello! Sending response...");
-
-                protocol::send_msg(&mut stream, protocol::Message::Hello)
-                    .await
-                    .unwrap();
-            }
-            protocol::Message::RunCommand(cmd) => {
-                info!("Received RunCommand: {}", cmd.command);
-
-                let out = tokio::process::Command::new(&cmd.command)
-                    .args(&cmd.args)
-                    .envs(&cmd.env)
-                    .current_dir(cmd.working_dir.unwrap_or_else(|| "/".to_string()))
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                    .expect("Failed to spawn command")
-                    .wait_with_output()
-                    .await
-                    .expect("Failed to wait on command");
-
-                info!("Command exited with status: {}", out.status);
-
-                let stdout_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-
-                info!("Command stdout: {}", stdout_str);
-
-                protocol::send_msg(
-                    &mut stream,
-                    protocol::Message::CommandOutput(protocol::CommandOutput {
-                        output: stdout_str.to_string(),
-                    }),
-                )
-                .await
-                .unwrap();
-            }
-            protocol::Message::SendFile(f) => {
-                info!("Received file transfer of {} bytes", f.data.len());
-            }
-            protocol::Message::Shutdown => {
-                info!("Shutting down guest...");
-                break;
-            }
-            _ => info!("Received other message"),
-        }
-    }
+    messaging::handle_messages(&mut stream).await;
 
     shutdown_actions();
 }

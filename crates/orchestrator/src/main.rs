@@ -102,7 +102,7 @@ async fn send_tar_file<T: AsyncWriteExt + Unpin>(stream: &mut T) {
 
     protocol::send_msg(stream, protocol::Message::SendFile(file_msg))
         .await
-        .unwrap();
+        .expect("Failed to send file");
 
     info!("Sent SendFile message to guest");
 }
