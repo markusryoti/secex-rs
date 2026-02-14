@@ -1,7 +1,7 @@
 use std::{io::Write, process::Command};
 
 use nix::sys::reboot::{RebootMode, reboot};
-use tokio_vsock::{VsockAddr, VsockListener};
+use tokio_vsock::{VsockAddr, VsockListener, VsockStream};
 use tracing::{error, info};
 
 mod messaging;
@@ -71,6 +71,11 @@ fn setup_networking() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn close_stream(mut stream: VsockStream) {
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().with_ansi(false).init();
@@ -79,28 +84,19 @@ async fn main() {
 
     mounts::mount_drives();
 
-    info!("Checking for curl...");
-    if std::path::Path::new("/usr/bin/curl").exists() {
-        info!("curl found at /usr/bin/curl");
-    } else {
-        error!("curl not found!");
-    }
-
     info!("Mounts complete. Entering main loop.");
 
     match setup_networking() {
         Ok(_) => (),
         Err(e) => {
             error!("Error setting up networking: {}", e);
-            panic!("Network setup failed");
+            return;
         }
     }
 
     if !std::path::Path::new("/dev/vsock").exists() {
         info!("ERROR: /dev/vsock does not exist! Make sure the driver is loaded.");
     }
-
-    info!("Init started. Listening on cid 3, port 5001...");
 
     let listener = match VsockListener::bind(VsockAddr::new(3, 5001)) {
         Ok(l) => l,
@@ -110,6 +106,8 @@ async fn main() {
             return;
         }
     };
+
+    info!("Init started. Listening on cid 3, port 5001...");
 
     let (mut stream, addr) = match listener.accept().await {
         Ok((s, a)) => (s, a),
@@ -124,8 +122,6 @@ async fn main() {
 
     messaging::handle_messages(&mut stream).await;
 
-    let _ = stream.flush();
-    let _ = stream.shutdown(std::net::Shutdown::Both);
-
+    close_stream(stream);
     shutdown_actions();
 }
