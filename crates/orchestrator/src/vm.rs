@@ -10,7 +10,6 @@ use macaddr::{MacAddr, MacAddr6};
 use tracing::info;
 
 use crate::firecracker;
-use crate::network;
 
 pub struct VmStore {
     vms: Vec<Arc<VmConfig>>,
@@ -64,7 +63,7 @@ impl VmConfig {
     pub fn initialize(&self, vsock_uds_path: &str) {
         self.edit_vm_config(vsock_uds_path);
         self.remove_existing_socket();
-        self.setup_vm_network();
+        // self.setup_vm_network();
     }
 
     pub fn launch(&self) -> tokio::process::Child {
@@ -140,10 +139,5 @@ impl VmConfig {
             .expect("Failed to remove socket with sudo");
 
         info!("Removed existing socket at {}", self.api_socket.display());
-    }
-
-    fn setup_vm_network(&self) {
-        network::set_network_interface(&self.host_ip, &self.tap);
-        info!("Set up VM network with TAP device at {}", self.host_ip);
     }
 }

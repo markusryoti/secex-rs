@@ -66,6 +66,8 @@ async fn handle_run_individual_command(
 
     let stdout_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
+    info!("Command out: {:?}", stdout_str);
+
     protocol::send_msg(
         stream,
         protocol::Message::CommandOutput(protocol::CommandOutput {

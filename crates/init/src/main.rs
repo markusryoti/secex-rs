@@ -1,8 +1,8 @@
-use std::io::Write;
+use std::{io::Write, process::Command};
 
 use nix::sys::reboot::{RebootMode, reboot};
 use tokio_vsock::{VsockAddr, VsockListener};
-use tracing::info;
+use tracing::{error, info};
 
 mod messaging;
 mod mounts;
@@ -15,6 +15,62 @@ fn shutdown_actions() {
     reboot(RebootMode::RB_AUTOBOOT).expect("Power off failed");
 }
 
+fn setup_networking() -> Result<(), Box<dyn std::error::Error>> {
+    // Bring up loopback
+    let status = Command::new("/sbin/ip")
+        .args(["link", "set", "lo", "up"])
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("Failed to bring up loopback: {}", status).into());
+    }
+    info!("Loopback interface up");
+
+    // Bring up eth0
+    let status = Command::new("/sbin/ip")
+        .args(["link", "set", "eth0", "up"])
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("Failed to bring up eth0: {}", status).into());
+    }
+    info!("eth0 interface up");
+
+    // Assign IP address to eth0
+    let status = Command::new("/sbin/ip")
+        .args(["addr", "add", "172.16.0.2/30", "dev", "eth0"])
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("Failed to assign IP: {}", status).into());
+    }
+    info!("IP address assigned");
+
+    // Add default route
+    let status = Command::new("/sbin/ip")
+        .args([
+            "route",
+            "add",
+            "default",
+            "via",
+            "172.16.0.1",
+            "dev",
+            "eth0",
+        ])
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("Failed to add route: {}", status).into());
+    }
+    info!("Route added successfully");
+
+    // Set DNS
+    std::fs::write("/etc/resolv.conf", "nameserver 8.8.8.8\n")?;
+    info!("DNS configured successfully");
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().with_ansi(false).init();
@@ -23,7 +79,22 @@ async fn main() {
 
     mounts::mount_drives();
 
+    info!("Checking for curl...");
+    if std::path::Path::new("/usr/bin/curl").exists() {
+        info!("curl found at /usr/bin/curl");
+    } else {
+        error!("curl not found!");
+    }
+
     info!("Mounts complete. Entering main loop.");
+
+    match setup_networking() {
+        Ok(_) => (),
+        Err(e) => {
+            error!("Error setting up networking: {}", e);
+            panic!("Network setup failed");
+        }
+    }
 
     if !std::path::Path::new("/dev/vsock").exists() {
         info!("ERROR: /dev/vsock does not exist! Make sure the driver is loaded.");

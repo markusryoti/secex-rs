@@ -70,6 +70,7 @@ async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
 async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     send_hello(stream).await;
     send_command(stream).await;
+    send_curl_command(stream).await;
     send_run_workspace(stream).await;
 
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -89,6 +90,21 @@ async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     let cmd = protocol::RunCommand {
         command: "echo".to_string(),
         args: vec!["Hello from orchestrator!".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
+        .await
+        .unwrap();
+
+    info!("Sent RunCommand message to guest");
+}
+
+async fn send_curl_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    let cmd = protocol::RunCommand {
+        command: "curl".to_string(),
+        args: vec!["-v".to_string(), "http://example.com".to_string()],
         env: std::collections::HashMap::new(),
         working_dir: None,
     };
@@ -122,6 +138,12 @@ async fn send_run_workspace<T: AsyncWriteExt + Unpin>(stream: &mut T) {
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let tap_name = "tap0";
+    let tap_ip = "172.16.0.1";
+    let mask = "/30";
+
+    network::setup_tap_device(tap_name, tap_ip, mask).expect("Tap setup failed");
+
     let mut store = vm::VmStore::new();
     info!("Created VM store");
 
@@ -139,4 +161,6 @@ async fn main() {
     handle_vm_lifecycle(vm).await;
 
     store.remove_vm(&id);
+
+    network::cleanup_tap_device(tap_name).expect("Failed to delete tap");
 }
