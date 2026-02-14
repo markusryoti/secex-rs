@@ -2,7 +2,7 @@ target/
 build/
 
 # Init binary
-init
+rootfs/init
 
 rootfs.ext4
 
