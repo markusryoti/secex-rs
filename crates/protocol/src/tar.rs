@@ -3,7 +3,7 @@ use tracing::error;
 
 pub fn tar_workspace(workspace_dir: &str, tar_path: &str) -> std::io::Result<()> {
     let output = Command::new("tar")
-        .arg("-czf")
+        .arg("-cf")
         .arg(tar_path)
         .arg("-C")
         .arg(workspace_dir)
@@ -26,7 +26,7 @@ pub fn tar_workspace(workspace_dir: &str, tar_path: &str) -> std::io::Result<()>
 
 pub fn untar_workspace(tar_path: &str, dest_dir: &str) -> std::io::Result<()> {
     let output = Command::new("tar")
-        .arg("-xzf")
+        .arg("-xf")
         .arg(tar_path)
         .arg("-C")
         .arg(dest_dir)

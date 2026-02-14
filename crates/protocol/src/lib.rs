@@ -14,6 +14,7 @@ pub struct Envelope {
 pub enum Message {
     Hello,
     RunCommand(RunCommand),
+    RunWorkspace(WorkspaceRunOptions),
     CommandOutput(CommandOutput),
     SendFile(FileTransfer),
     Shutdown,
@@ -35,6 +36,12 @@ pub struct RunCommand {
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
     pub working_dir: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WorkspaceRunOptions {
+    pub data: Vec<u8>,
+    pub entrypoint: String,
 }
 
 pub async fn send_msg(

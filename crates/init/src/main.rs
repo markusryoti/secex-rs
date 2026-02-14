@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use nix::sys::reboot::{RebootMode, reboot};
 use tokio_vsock::{VsockAddr, VsockListener};
 use tracing::info;
@@ -15,15 +17,7 @@ fn shutdown_actions() {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .with_file(false)
-        .with_line_number(false)
-        .without_time()
-        .init();
+    tracing_subscriber::fmt().with_ansi(false).init();
 
     info!("Init started. Checking mounts...");
 
@@ -58,6 +52,9 @@ async fn main() {
     info!("Connection accepted from {:?}", addr);
 
     messaging::handle_messages(&mut stream).await;
+
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Both);
 
     shutdown_actions();
 }

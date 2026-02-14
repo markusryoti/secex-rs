@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use protocol::WorkspaceRunOptions;
+use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::info;
+use tracing::{error, info};
 
 mod firecracker;
 mod network;
@@ -39,9 +40,13 @@ async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
 
 async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
     loop {
-        let message = protocol::recv_msg(&mut stream)
-            .await
-            .expect("Failed to receive message");
+        let message = match protocol::recv_msg(&mut stream).await {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Error receiving message: {}", e);
+                return;
+            }
+        };
 
         match message {
             protocol::Message::Hello => {
@@ -49,7 +54,6 @@ async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
             }
             protocol::Message::CommandOutput(output) => {
                 info!("Received command output from guest: {}", output.output);
-                break;
             }
             m => info!("Received other message: {:?}", m),
         }
@@ -61,13 +65,19 @@ async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
         .await
         .unwrap();
 
+    let _ = stream.shutdown();
+
     info!("Sent Shutdown message to guest, closing connection...");
 }
 
 async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     send_hello(stream).await;
     send_command(stream).await;
-    send_tar_file(stream).await;
+    send_run_workspace(stream).await;
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    send_shutdown(stream).await;
 }
 
 async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
@@ -93,18 +103,22 @@ async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     info!("Sent RunCommand message to guest");
 }
 
-async fn send_tar_file<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+async fn send_run_workspace<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
 
     let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
 
-    let file_msg = protocol::FileTransfer { data };
+    protocol::send_msg(
+        stream,
+        protocol::Message::RunWorkspace(WorkspaceRunOptions {
+            data,
+            entrypoint: "run.sh".to_string(),
+        }),
+    )
+    .await
+    .expect("Failed to send file");
 
-    protocol::send_msg(stream, protocol::Message::SendFile(file_msg))
-        .await
-        .expect("Failed to send file");
-
-    info!("Sent SendFile message to guest");
+    info!("Sent RunWorkspace message to guest");
 }
 
 #[tokio::main]
