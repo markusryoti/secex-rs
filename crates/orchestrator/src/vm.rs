@@ -3,13 +3,19 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use macaddr::{MacAddr, MacAddr6};
-use tracing::info;
+use protocol::WorkspaceRunOptions;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::Child,
+};
+use tracing::{error, info};
 
-use crate::firecracker;
+use crate::{firecracker, vsock};
 
 pub struct VmStore {
     vms: Vec<Arc<VmConfig>>,
@@ -28,10 +34,6 @@ impl VmStore {
         self.vms.retain(|vm| vm.id != id);
     }
 
-    // pub fn get(&self, id: &str) -> Option<Arc<VmConfig>> {
-    //     self.vms.iter().find(|vm| vm.id == id).cloned()
-    // }
-
     pub fn len(&self) -> usize {
         self.vms.len()
     }
@@ -39,16 +41,20 @@ impl VmStore {
 
 pub struct VmConfig {
     pub id: String,
-    pub api_socket: PathBuf,
-    pub tap: String,
+    api_socket: PathBuf,
+    tap: String,
     _host_ip: Ipv4Addr,
     mac: MacAddr,
+    process: Mutex<Option<Child>>,
+    vsock_path: String,
 }
 
 impl VmConfig {
     pub fn new(seq: usize) -> Self {
         let id = format!("vm-{}", seq);
         let socket_name = format!("/tmp/firecracker-{}.socket", seq);
+        let vsock_uds_path = format!("/tmp/vsock-{}.sock", id);
+
         let tap = format!("tap{}", seq);
 
         VmConfig {
@@ -57,15 +63,18 @@ impl VmConfig {
             tap: tap,
             _host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
+            process: Mutex::new(None),
+            vsock_path: vsock_uds_path,
         }
     }
 
-    pub fn initialize(&self, vsock_uds_path: &str) {
-        self.edit_vm_config(vsock_uds_path);
+    pub fn initialize(&self) {
+        self.edit_vm_config(&self.vsock_path);
         self.remove_existing_socket();
+        vsock::remove_existing_vsock(&self.vsock_path);
     }
 
-    pub fn launch(&self) -> tokio::process::Child {
+    pub async fn launch(&self) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
 
@@ -85,7 +94,31 @@ impl VmConfig {
             .spawn()
             .expect("Failed to start firecracker");
 
-        child
+        {
+            let mut process = self.process.lock().unwrap();
+            *process = Some(child);
+        }
+
+        info!(
+            "VM {} launched with API socket at {:?} and TAP device {}",
+            self.id, self.api_socket, self.tap
+        );
+    }
+
+    pub async fn connect(&self) {
+        vsock::wait_for_socket(&self.vsock_path).await;
+
+        let stream = vsock::connect_to_vsock(&self.vsock_path).await;
+
+        let (reader, mut writer) = stream.into_split();
+
+        let handle = tokio::spawn(async {
+            handle_incoming(reader).await;
+        });
+
+        initial_commands(&mut writer).await;
+
+        handle.await.unwrap();
     }
 
     fn edit_vm_config(&self, vsock_uds_path: &str) {
@@ -139,4 +172,103 @@ impl VmConfig {
 
         info!("Removed existing socket at {}", self.api_socket.display());
     }
+}
+
+async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
+    loop {
+        let message = match protocol::recv_msg(&mut stream).await {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Error receiving message: {}", e);
+                return;
+            }
+        };
+
+        match message {
+            protocol::Message::Hello => {
+                info!("Guest said Hello!");
+            }
+            protocol::Message::CommandOutput(output) => {
+                info!("Received command output from guest: {}", output.output);
+            }
+            m => info!("Received other message: {:?}", m),
+        }
+    }
+}
+
+async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    protocol::send_msg(stream, protocol::Message::Shutdown)
+        .await
+        .unwrap();
+
+    info!("Sent Shutdown message to guest, closing connection...");
+
+    let _ = stream.shutdown();
+}
+
+async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    send_hello(stream).await;
+    send_command(stream).await;
+    send_curl_command(stream).await;
+    send_run_workspace(stream).await;
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    send_shutdown(stream).await;
+}
+
+async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    protocol::send_msg(stream, protocol::Message::Hello)
+        .await
+        .unwrap();
+
+    info!("Sent Hello message to guest");
+}
+
+async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    let cmd = protocol::RunCommand {
+        command: "echo".to_string(),
+        args: vec!["Hello from orchestrator!".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
+        .await
+        .unwrap();
+
+    info!("Sent RunCommand message to guest");
+}
+
+async fn send_curl_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    let cmd = protocol::RunCommand {
+        command: "curl".to_string(),
+        args: vec!["-v".to_string(), "http://example.com".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
+        .await
+        .unwrap();
+
+    info!("Sent RunCommand message to guest");
+}
+
+async fn send_run_workspace<T: AsyncWriteExt + Unpin>(stream: &mut T) {
+    protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
+
+    let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
+
+    protocol::send_msg(
+        stream,
+        protocol::Message::RunWorkspace(WorkspaceRunOptions {
+            data,
+            entrypoint: "run.sh".to_string(),
+        }),
+    )
+    .await
+    .expect("Failed to run in workspace");
+
+    info!("Sent RunWorkspace message to guest");
 }
