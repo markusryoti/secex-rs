@@ -33,9 +33,6 @@ async fn handle_vm_lifecycle(vm: Arc<vm::VmConfig>) {
     initial_commands(&mut writer).await;
 
     handle.await.unwrap();
-
-    info!("Initiating shutdown sequence...");
-    send_shutdown(&mut writer).await;
 }
 
 async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
@@ -65,9 +62,9 @@ async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
         .await
         .unwrap();
 
-    let _ = stream.shutdown();
-
     info!("Sent Shutdown message to guest, closing connection...");
+
+    let _ = stream.shutdown();
 }
 
 async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
@@ -116,7 +113,7 @@ async fn send_run_workspace<T: AsyncWriteExt + Unpin>(stream: &mut T) {
         }),
     )
     .await
-    .expect("Failed to send file");
+    .expect("Failed to run in workspace");
 
     info!("Sent RunWorkspace message to guest");
 }
