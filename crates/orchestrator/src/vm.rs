@@ -41,7 +41,7 @@ pub struct VmConfig {
     pub id: String,
     pub api_socket: PathBuf,
     pub tap: String,
-    host_ip: Ipv4Addr,
+    _host_ip: Ipv4Addr,
     mac: MacAddr,
 }
 
@@ -55,7 +55,7 @@ impl VmConfig {
             id: id,
             api_socket: PathBuf::from(socket_name),
             tap: tap,
-            host_ip: Ipv4Addr::new(172, 16, 0, 1),
+            _host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
         }
     }
@@ -63,7 +63,6 @@ impl VmConfig {
     pub fn initialize(&self, vsock_uds_path: &str) {
         self.edit_vm_config(vsock_uds_path);
         self.remove_existing_socket();
-        // self.setup_vm_network();
     }
 
     pub fn launch(&self) -> tokio::process::Child {
