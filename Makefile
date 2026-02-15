@@ -23,3 +23,6 @@ remove-logs:
 	find . -name "vm-*.out.log" -type f -delete; \
 	find . -name "vm-*.err.log" -type f -delete; \
 	echo "Log files removed"
+
+download-kernel:
+	./tools/download-kernel.sh

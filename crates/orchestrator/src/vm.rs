@@ -124,7 +124,7 @@ impl VmConfig {
 
         config.fill_values(
             current_dir
-                .join("vmlinux-6.1.155")
+                .join("vmlinux-kernel")
                 .to_str()
                 .expect("Invalid kernel path"),
             current_dir

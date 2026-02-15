@@ -10,5 +10,7 @@ latest_kernel_key=$(curl "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecrac
     | grep -oP "(?<=<Key>)(firecracker-ci/$CI_VERSION/$ARCH/vmlinux-[0-9]+\.[0-9]+\.[0-9]{1,3})(?=</Key>)" \
     | sort -V | tail -1)
 
+echo "Downloading ${latest_kernel_key}"
+
 # Download a linux kernel binary
-wget "https://s3.amazonaws.com/spec.ccfc.min/${latest_kernel_key}"
+wget "https://s3.amazonaws.com/spec.ccfc.min/${latest_kernel_key}" -O vmlinux-kernel
