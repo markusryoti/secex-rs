@@ -15,7 +15,7 @@ use tokio::{
 };
 use tracing::{error, info};
 
-use crate::{firecracker, vsock};
+use crate::{firecracker, network, vsock};
 
 pub struct VmStore {
     vms: Vec<Arc<VmConfig>>,
@@ -28,6 +28,11 @@ impl VmStore {
 
     pub fn add_vm(&mut self, vm: Arc<VmConfig>) {
         self.vms.push(vm);
+    }
+
+    pub fn get_vm(&self, id: &str) -> Option<&Arc<VmConfig>> {
+        let found = self.vms.iter().find(|vm| vm.id == id);
+        found
     }
 
     pub fn remove_vm(&mut self, id: &str) {
@@ -43,7 +48,7 @@ pub struct VmConfig {
     pub id: String,
     api_socket: PathBuf,
     tap: String,
-    _host_ip: Ipv4Addr,
+    host_ip: Ipv4Addr,
     mac: MacAddr,
     process: Mutex<Option<Child>>,
     vsock_path: String,
@@ -61,7 +66,7 @@ impl VmConfig {
             id: id,
             api_socket: PathBuf::from(socket_name),
             tap: tap,
-            _host_ip: Ipv4Addr::new(172, 16, 0, 1),
+            host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
             process: Mutex::new(None),
             vsock_path: vsock_uds_path,
@@ -71,7 +76,11 @@ impl VmConfig {
     pub fn initialize(&self) {
         self.edit_vm_config(&self.vsock_path);
         self.remove_existing_socket();
+
         vsock::remove_existing_vsock(&self.vsock_path);
+
+        network::setup_tap_device(&self.tap, &self.host_ip.to_string(), "/30")
+            .expect("Tap setup failed");
     }
 
     pub async fn launch(&self) {
@@ -95,7 +104,7 @@ impl VmConfig {
             .expect("Failed to start firecracker");
 
         {
-            let mut process = self.process.lock().unwrap();
+            let mut process = self.process.lock().expect("Failed to grab process mutex");
             *process = Some(child);
         }
 
@@ -119,6 +128,10 @@ impl VmConfig {
         initial_commands(&mut writer).await;
 
         handle.await.unwrap();
+    }
+
+    pub fn cleanup(&self) {
+        network::cleanup_tap_device(&self.tap).expect("Failed to delete tap");
     }
 
     fn edit_vm_config(&self, vsock_uds_path: &str) {
@@ -212,7 +225,7 @@ async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
     send_curl_command(stream).await;
     send_run_workspace(stream).await;
 
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     send_shutdown(stream).await;
 }
