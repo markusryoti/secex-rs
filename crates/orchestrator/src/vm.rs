@@ -4,15 +4,10 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use macaddr::{MacAddr, MacAddr6};
-use protocol::WorkspaceRunOptions;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::Child,
-};
+use tokio::{io::AsyncReadExt, net::unix::OwnedWriteHalf, process::Child};
 use tracing::{error, info};
 
 use crate::{firecracker, network, vsock};
@@ -51,6 +46,7 @@ pub struct VmConfig {
     host_ip: Ipv4Addr,
     mac: MacAddr,
     process: Mutex<Option<Child>>,
+    writer: Mutex<Option<OwnedWriteHalf>>,
     vsock_path: String,
 }
 
@@ -69,6 +65,7 @@ impl VmConfig {
             host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
             process: Mutex::new(None),
+            writer: Mutex::new(None),
             vsock_path: vsock_uds_path,
         }
     }
@@ -119,15 +116,23 @@ impl VmConfig {
 
         let stream = vsock::connect_to_vsock(&self.vsock_path).await;
 
-        let (reader, mut writer) = stream.into_split();
+        let (reader, writer) = stream.into_split();
 
-        let handle = tokio::spawn(async {
-            handle_incoming(reader).await;
-        });
+        {
+            let mut write_guard = self.writer.lock().expect("Failed to get write mutex");
+            *write_guard = Some(writer);
+        }
 
-        initial_commands(&mut writer).await;
+        tokio::spawn(handle_incoming(reader));
+    }
 
-        handle.await.unwrap();
+    pub async fn send_message(
+        &self,
+        msg: protocol::Message,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut write_guard = self.writer.lock().expect("Failed to grab writer mutex");
+        let mut stream = write_guard.as_mut().unwrap();
+        protocol::send_msg(&mut stream, msg).await
     }
 
     pub fn cleanup(&self) {
@@ -207,81 +212,4 @@ async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
             m => info!("Received other message: {:?}", m),
         }
     }
-}
-
-async fn send_shutdown<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    protocol::send_msg(stream, protocol::Message::Shutdown)
-        .await
-        .unwrap();
-
-    info!("Sent Shutdown message to guest, closing connection...");
-
-    let _ = stream.shutdown();
-}
-
-async fn initial_commands<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    send_hello(stream).await;
-    send_command(stream).await;
-    send_curl_command(stream).await;
-    send_run_workspace(stream).await;
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    send_shutdown(stream).await;
-}
-
-async fn send_hello<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    protocol::send_msg(stream, protocol::Message::Hello)
-        .await
-        .unwrap();
-
-    info!("Sent Hello message to guest");
-}
-
-async fn send_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    let cmd = protocol::RunCommand {
-        command: "echo".to_string(),
-        args: vec!["Hello from orchestrator!".to_string()],
-        env: std::collections::HashMap::new(),
-        working_dir: None,
-    };
-
-    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
-        .await
-        .unwrap();
-
-    info!("Sent RunCommand message to guest");
-}
-
-async fn send_curl_command<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    let cmd = protocol::RunCommand {
-        command: "curl".to_string(),
-        args: vec!["-v".to_string(), "http://example.com".to_string()],
-        env: std::collections::HashMap::new(),
-        working_dir: None,
-    };
-
-    protocol::send_msg(stream, protocol::Message::RunCommand(cmd))
-        .await
-        .unwrap();
-
-    info!("Sent RunCommand message to guest");
-}
-
-async fn send_run_workspace<T: AsyncWriteExt + Unpin>(stream: &mut T) {
-    protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
-
-    let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
-
-    protocol::send_msg(
-        stream,
-        protocol::Message::RunWorkspace(WorkspaceRunOptions {
-            data,
-            entrypoint: "run.sh".to_string(),
-        }),
-    )
-    .await
-    .expect("Failed to run in workspace");
-
-    info!("Sent RunWorkspace message to guest");
 }

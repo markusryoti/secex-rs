@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::vm::VmStore;
 
@@ -31,6 +31,41 @@ async fn handle_vm(id: &str, store: &mut VmStore) {
     vm.initialize();
     vm.launch().await;
     vm.connect().await;
+
+    vm.send_message(protocol::Message::Hello)
+        .await
+        .expect("Failed to send hello command");
+
+    let curl_cmd = protocol::RunCommand {
+        command: "curl".to_string(),
+        args: vec!["-v".to_string(), "http://example.com".to_string()],
+        env: std::collections::HashMap::new(),
+        working_dir: None,
+    };
+
+    vm.send_message(protocol::Message::RunCommand(curl_cmd))
+        .await
+        .expect("Failed to send curl command");
+
+    protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
+
+    let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
+
+    let ws_msg = protocol::Message::RunWorkspace(protocol::WorkspaceRunOptions {
+        data,
+        entrypoint: "run.sh".to_string(),
+    });
+
+    vm.send_message(ws_msg)
+        .await
+        .expect("Failed to send workspace command");
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    vm.send_message(protocol::Message::Shutdown)
+        .await
+        .expect("Shutdown message sending failed");
+
     vm.cleanup();
 
     store.remove_vm(&id);
