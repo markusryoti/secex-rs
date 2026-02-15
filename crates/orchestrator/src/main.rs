@@ -1,10 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::vm::VmStore;
-
 mod firecracker;
 mod network;
 mod vm;
+mod vm_store;
 mod vsock;
 
 #[tokio::main]
@@ -13,7 +12,7 @@ async fn main() {
 
     network::setup_ip_forwarding().expect("Failed to setup forwarding");
 
-    let mut store = vm::VmStore::new();
+    let mut store = vm_store::VmStore::new();
 
     let vm = vm::VmConfig::new(store.len() + 1);
     let id = vm.id.clone();
@@ -24,7 +23,7 @@ async fn main() {
     network::cleanup_ip_forwarding().expect("Failed to cleanup forwarding");
 }
 
-async fn handle_vm(id: &str, store: &mut VmStore) {
+async fn handle_vm(id: &str, store: &mut vm_store::VmStore) {
     let vm = store.get_vm(&id);
     let vm = vm.unwrap();
 
