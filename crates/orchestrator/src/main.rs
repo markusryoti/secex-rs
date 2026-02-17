@@ -1,5 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
+use tokio::sync::Mutex;
+
+use crate::vm::VmConfig;
+
 mod firecracker;
 mod network;
 mod vm;
@@ -12,26 +16,34 @@ async fn main() {
 
     network::setup_ip_forwarding().expect("Failed to setup forwarding");
 
-    let mut store = vm_store::VmStore::new();
+    let store = Arc::new(Mutex::new(vm_store::VmStore::new()));
 
-    let vm = vm::VmConfig::new(store.len() + 1);
+    let vm = vm::VmConfig::new(store.lock().await.len() + 1);
     let id = vm.id.clone();
-    store.add_vm(Arc::new(vm));
+    store.lock().await.add_vm(&id, vm);
 
-    handle_vm(&id, &mut store).await;
+    let vm = store.lock().await.get_vm(&id).unwrap();
+
+    let handle = tokio::spawn(handle_vm(vm));
+
+    handle.await.expect("Failed to wait task handle");
+
+    store.lock().await.remove_vm(&id);
 
     network::cleanup_ip_forwarding().expect("Failed to cleanup forwarding");
 }
 
-async fn handle_vm(id: &str, store: &mut vm_store::VmStore) {
-    let vm = store.get_vm(&id);
-    let vm = vm.unwrap();
+async fn handle_vm(vm: Arc<Mutex<VmConfig>>) {
+    {
+        let vm = vm.lock().await;
+        vm.initialize();
+        vm.launch();
+        vm.connect().await;
+    }
 
-    vm.initialize();
-    vm.launch().await;
-    vm.connect().await;
-
-    vm.send_message(protocol::Message::Hello)
+    vm.lock()
+        .await
+        .send_message(protocol::Message::Hello)
         .await
         .expect("Failed to send hello command");
 
@@ -42,7 +54,9 @@ async fn handle_vm(id: &str, store: &mut vm_store::VmStore) {
         working_dir: None,
     };
 
-    vm.send_message(protocol::Message::RunCommand(curl_cmd))
+    vm.lock()
+        .await
+        .send_message(protocol::Message::RunCommand(curl_cmd))
         .await
         .expect("Failed to send curl command");
 
@@ -55,17 +69,19 @@ async fn handle_vm(id: &str, store: &mut vm_store::VmStore) {
         entrypoint: "run.sh".to_string(),
     });
 
-    vm.send_message(ws_msg)
+    vm.lock()
+        .await
+        .send_message(ws_msg)
         .await
         .expect("Failed to send workspace command");
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    vm.send_message(protocol::Message::Shutdown)
+    vm.lock()
+        .await
+        .send_message(protocol::Message::Shutdown)
         .await
         .expect("Shutdown message sending failed");
 
-    vm.cleanup();
-
-    store.remove_vm(&id);
+    vm.lock().await.cleanup();
 }
