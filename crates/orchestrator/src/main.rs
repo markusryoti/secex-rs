@@ -24,7 +24,9 @@ async fn main() {
 
     let vm = store.lock().await.get_vm(&id).unwrap();
 
-    handle_vm(vm).await;
+    let handle = tokio::spawn(handle_vm(vm));
+
+    handle.await.expect("Failed to wait task handle");
 
     store.lock().await.remove_vm(&id);
 
@@ -35,7 +37,7 @@ async fn handle_vm(vm: Arc<Mutex<VmConfig>>) {
     {
         let vm = vm.lock().await;
         vm.initialize();
-        vm.launch().await;
+        vm.launch();
         vm.connect().await;
     }
 

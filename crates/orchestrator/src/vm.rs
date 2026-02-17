@@ -3,7 +3,6 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{Command, Stdio},
-    sync::Mutex,
 };
 
 use macaddr::{MacAddr, MacAddr6};
@@ -18,8 +17,8 @@ pub struct VmConfig {
     tap: String,
     host_ip: Ipv4Addr,
     mac: MacAddr,
-    process: Mutex<Option<Child>>,
-    writer: Mutex<Option<OwnedWriteHalf>>,
+    process: std::sync::Mutex<Option<Child>>,
+    writer: tokio::sync::Mutex<Option<OwnedWriteHalf>>,
     vsock_path: String,
 }
 
@@ -37,8 +36,8 @@ impl VmConfig {
             tap: tap,
             host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
-            process: Mutex::new(None),
-            writer: Mutex::new(None),
+            process: std::sync::Mutex::new(None),
+            writer: tokio::sync::Mutex::new(None),
             vsock_path: vsock_uds_path,
         }
     }
@@ -53,7 +52,7 @@ impl VmConfig {
             .expect("Tap setup failed");
     }
 
-    pub async fn launch(&self) {
+    pub fn launch(&self) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
 
@@ -92,7 +91,7 @@ impl VmConfig {
         let (reader, writer) = stream.into_split();
 
         {
-            let mut write_guard = self.writer.lock().expect("Failed to get write mutex");
+            let mut write_guard = self.writer.lock().await;
             *write_guard = Some(writer);
         }
 
@@ -103,9 +102,13 @@ impl VmConfig {
         &self,
         msg: protocol::Message,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut write_guard = self.writer.lock().expect("Failed to grab writer mutex");
-        let mut stream = write_guard.as_mut().unwrap();
-        protocol::send_msg(&mut stream, msg).await
+        if let Some(stream) = self.writer.lock().await.as_mut() {
+            protocol::send_msg(stream, msg)
+                .await
+                .expect("Error sedning to stream");
+        };
+
+        Ok(())
     }
 
     pub fn cleanup(&self) {
