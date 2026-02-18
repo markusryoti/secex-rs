@@ -3,50 +3,18 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::Mutex,
 };
 
 use macaddr::{MacAddr, MacAddr6};
 use tokio::{io::AsyncReadExt, net::unix::OwnedWriteHalf, process::Child};
 use tracing::{error, info};
 
-use crate::{firecracker, network, vsock};
-
-pub struct VmHandle {
-    pub id: String,
-    tx: tokio::sync::mpsc::Sender<VmMessage>,
-}
-
-impl VmHandle {
-    pub async fn start_vm(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.tx.send(VmMessage::StartVm).await?;
-
-        Ok(())
-    }
-
-    pub async fn send_command(
-        &self,
-        cmd: protocol::RunCommand,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.tx.send(VmMessage::Command(cmd)).await?;
-
-        Ok(())
-    }
-
-    pub async fn send_workspace_command(
-        &self,
-        cmd: protocol::WorkspaceRunOptions,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.tx.send(VmMessage::WorkspaceCommand(cmd)).await?;
-
-        Ok(())
-    }
-
-    pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.tx.send(VmMessage::Shutdown).await?;
-
-        Ok(())
-    }
-}
+use crate::{
+    firecracker, network,
+    vm_handle::{VmHandle, VmMessage},
+    vsock,
+};
 
 pub fn spawn_vm(seq: usize) -> VmHandle {
     let vm = VmActor::new(seq);
@@ -56,16 +24,9 @@ pub fn spawn_vm(seq: usize) -> VmHandle {
 
     tokio::spawn(vm.run(rx));
 
-    let handle = VmHandle { id, tx };
+    let handle = VmHandle::new(id, tx);
 
     handle
-}
-
-pub enum VmMessage {
-    StartVm,
-    Command(protocol::RunCommand),
-    WorkspaceCommand(protocol::WorkspaceRunOptions),
-    Shutdown,
 }
 
 pub struct VmActor {
@@ -74,7 +35,7 @@ pub struct VmActor {
     tap: String,
     host_ip: Ipv4Addr,
     mac: MacAddr,
-    process: std::sync::Mutex<Option<Child>>,
+    process: Mutex<Option<Child>>,
     writer: tokio::sync::Mutex<Option<OwnedWriteHalf>>,
     vsock_path: String,
 }
@@ -93,7 +54,7 @@ impl VmActor {
             tap: tap,
             host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
-            process: std::sync::Mutex::new(None),
+            process: Mutex::new(None),
             writer: tokio::sync::Mutex::new(None),
             vsock_path: vsock_uds_path,
         }

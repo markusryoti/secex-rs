@@ -2,11 +2,10 @@ use std::{sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
 
-use crate::vm::VmHandle;
-
 mod firecracker;
 mod network;
 mod vm;
+mod vm_handle;
 mod vm_store;
 mod vsock;
 
@@ -34,7 +33,7 @@ async fn main() {
     network::cleanup_ip_forwarding().expect("Failed to cleanup forwarding");
 }
 
-async fn handle_vm(vm: Arc<VmHandle>) {
+async fn handle_vm(vm: Arc<vm_handle::VmHandle>) {
     vm.start_vm().await.unwrap();
 
     let curl_cmd = protocol::RunCommand {

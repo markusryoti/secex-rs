@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::vm::VmHandle;
+use crate::vm_handle::VmHandle;
 
 pub struct VmStore {
     vms: HashMap<String, Arc<VmHandle>>,
