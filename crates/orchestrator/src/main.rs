@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
 
-use crate::vm::VmConfig;
+use crate::vm::VmHandle;
 
 mod firecracker;
 mod network;
@@ -18,8 +18,9 @@ async fn main() {
 
     let store = Arc::new(Mutex::new(vm_store::VmStore::new()));
 
-    let vm = vm::VmConfig::new(store.lock().await.len() + 1);
+    let vm = vm::spawn_vm(store.lock().await.len() + 1);
     let id = vm.id.clone();
+
     store.lock().await.add_vm(&id, vm);
 
     let vm = store.lock().await.get_vm(&id).unwrap();
@@ -33,19 +34,8 @@ async fn main() {
     network::cleanup_ip_forwarding().expect("Failed to cleanup forwarding");
 }
 
-async fn handle_vm(vm: Arc<Mutex<VmConfig>>) {
-    {
-        let vm = vm.lock().await;
-        vm.initialize();
-        vm.launch();
-        vm.connect().await;
-    }
-
-    vm.lock()
-        .await
-        .send_message(protocol::Message::Hello)
-        .await
-        .expect("Failed to send hello command");
+async fn handle_vm(vm: Arc<VmHandle>) {
+    vm.start_vm().await.unwrap();
 
     let curl_cmd = protocol::RunCommand {
         command: "curl".to_string(),
@@ -54,34 +44,20 @@ async fn handle_vm(vm: Arc<Mutex<VmConfig>>) {
         working_dir: None,
     };
 
-    vm.lock()
-        .await
-        .send_message(protocol::Message::RunCommand(curl_cmd))
-        .await
-        .expect("Failed to send curl command");
+    vm.send_command(curl_cmd).await.unwrap();
 
     protocol::tar::tar_workspace("workspace", "workspace.tar").expect("Failed to create tarball");
 
     let data = std::fs::read("workspace.tar").expect("Failed to read tarball");
 
-    let ws_msg = protocol::Message::RunWorkspace(protocol::WorkspaceRunOptions {
+    let ws_cmd = protocol::WorkspaceRunOptions {
         data,
         entrypoint: "run.sh".to_string(),
-    });
+    };
 
-    vm.lock()
-        .await
-        .send_message(ws_msg)
-        .await
-        .expect("Failed to send workspace command");
+    vm.send_workspace_command(ws_cmd).await.unwrap();
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    vm.lock()
-        .await
-        .send_message(protocol::Message::Shutdown)
-        .await
-        .expect("Shutdown message sending failed");
-
-    vm.lock().await.cleanup();
+    vm.shutdown().await.unwrap();
 }

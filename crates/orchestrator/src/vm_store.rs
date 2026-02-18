@@ -1,11 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::Mutex;
-
-use crate::vm::VmConfig;
+use crate::vm::VmHandle;
 
 pub struct VmStore {
-    vms: HashMap<String, Arc<Mutex<VmConfig>>>,
+    vms: HashMap<String, Arc<VmHandle>>,
 }
 
 impl VmStore {
@@ -15,11 +13,11 @@ impl VmStore {
         }
     }
 
-    pub fn add_vm(&mut self, id: &str, vm: VmConfig) {
-        self.vms.insert(id.into(), Arc::new(Mutex::new(vm)));
+    pub fn add_vm(&mut self, id: &str, vm: VmHandle) {
+        self.vms.insert(id.into(), Arc::new(vm));
     }
 
-    pub fn get_vm(&self, id: &str) -> Option<Arc<Mutex<VmConfig>>> {
+    pub fn get_vm(&self, id: &str) -> Option<Arc<VmHandle>> {
         let vm = self.vms.get(&id.to_string()).cloned();
         vm
     }

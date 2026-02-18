@@ -11,7 +11,64 @@ use tracing::{error, info};
 
 use crate::{firecracker, network, vsock};
 
-pub struct VmConfig {
+pub struct VmHandle {
+    pub id: String,
+    tx: tokio::sync::mpsc::Sender<VmMessage>,
+}
+
+impl VmHandle {
+    pub async fn start_vm(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.tx.send(VmMessage::StartVm).await?;
+
+        Ok(())
+    }
+
+    pub async fn send_command(
+        &self,
+        cmd: protocol::RunCommand,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.tx.send(VmMessage::Command(cmd)).await?;
+
+        Ok(())
+    }
+
+    pub async fn send_workspace_command(
+        &self,
+        cmd: protocol::WorkspaceRunOptions,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.tx.send(VmMessage::WorkspaceCommand(cmd)).await?;
+
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.tx.send(VmMessage::Shutdown).await?;
+
+        Ok(())
+    }
+}
+
+pub fn spawn_vm(seq: usize) -> VmHandle {
+    let vm = VmActor::new(seq);
+    let id = vm.id.clone();
+
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+    tokio::spawn(vm.run(rx));
+
+    let handle = VmHandle { id, tx };
+
+    handle
+}
+
+pub enum VmMessage {
+    StartVm,
+    Command(protocol::RunCommand),
+    WorkspaceCommand(protocol::WorkspaceRunOptions),
+    Shutdown,
+}
+
+pub struct VmActor {
     pub id: String,
     api_socket: PathBuf,
     tap: String,
@@ -22,15 +79,15 @@ pub struct VmConfig {
     vsock_path: String,
 }
 
-impl VmConfig {
-    pub fn new(seq: usize) -> Self {
+impl VmActor {
+    fn new(seq: usize) -> Self {
         let id = format!("vm-{}", seq);
         let socket_name = format!("/tmp/firecracker-{}.socket", seq);
         let vsock_uds_path = format!("/tmp/vsock-{}.sock", id);
 
         let tap = format!("tap{}", seq);
 
-        VmConfig {
+        VmActor {
             id: id,
             api_socket: PathBuf::from(socket_name),
             tap: tap,
@@ -42,7 +99,7 @@ impl VmConfig {
         }
     }
 
-    pub fn initialize(&self) {
+    pub async fn launch(&self) {
         self.edit_vm_config(&self.vsock_path);
         self.remove_existing_socket();
 
@@ -50,9 +107,7 @@ impl VmConfig {
 
         network::setup_tap_device(&self.tap, &self.host_ip.to_string(), "/30")
             .expect("Tap setup failed");
-    }
 
-    pub fn launch(&self) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
 
@@ -81,9 +136,7 @@ impl VmConfig {
             "VM {} launched with API socket at {:?} and TAP device {}",
             self.id, self.api_socket, self.tap
         );
-    }
 
-    pub async fn connect(&self) {
         vsock::wait_for_socket(&self.vsock_path).await;
 
         let stream = vsock::connect_to_vsock(&self.vsock_path).await;
@@ -98,10 +151,24 @@ impl VmConfig {
         tokio::spawn(handle_incoming(reader));
     }
 
-    pub async fn send_message(
-        &self,
-        msg: protocol::Message,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(self, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                VmMessage::StartVm => self.launch().await,
+                VmMessage::Command(run_command) => self
+                    .send_message(protocol::Message::RunCommand(run_command))
+                    .await
+                    .unwrap(),
+                VmMessage::WorkspaceCommand(workspace_run_options) => self
+                    .send_message(protocol::Message::RunWorkspace(workspace_run_options))
+                    .await
+                    .unwrap(),
+                VmMessage::Shutdown => self.cleanup(),
+            }
+        }
+    }
+
+    async fn send_message(&self, msg: protocol::Message) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(stream) = self.writer.lock().await.as_mut() {
             protocol::send_msg(stream, msg)
                 .await
