@@ -1,7 +1,7 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     net::Ipv4Addr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
 };
@@ -71,6 +71,10 @@ impl VmActor {
 
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
         let firecracker_path = current_dir.join("firecracker");
+
+        info!("Current dir: {:?}", current_dir);
+
+        self.create_rootfs_file().expect("Failed to create rootfs");
 
         let stdout_file =
             File::create(format!("{}.out.log", self.id)).expect("Failed to create stdout log file");
@@ -143,6 +147,18 @@ impl VmActor {
         network::cleanup_tap_device(&self.tap).expect("Failed to delete tap");
     }
 
+    fn create_rootfs_file(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !Path::exists(Path::new("filesystems")) {
+            fs::create_dir("filesystems")?;
+            info!("Created filesystems dir");
+        }
+
+        fs::copy("build/rootfs.ext4", format!("filesystems/{}.ext4", self.id))?;
+        info!("Rootfs created ");
+
+        Ok(())
+    }
+
     fn edit_vm_config(&self, vsock_uds_path: &str) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
@@ -159,7 +175,7 @@ impl VmActor {
                 .to_str()
                 .expect("Invalid kernel path"),
             current_dir
-                .join("build/rootfs.ext4")
+                .join(format!("filesystems/{}.ext4", self.id))
                 .to_str()
                 .expect("Invalid rootfs path"),
             &self.tap,

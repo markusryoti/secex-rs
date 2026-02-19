@@ -1,9 +1,7 @@
 target/
 build/
 
-# Init binary
 rootfs/init
-
 rootfs.ext4
 
 release-v*/
@@ -15,3 +13,5 @@ firecracker
 vm-*_config.json
 
 *.tar
+
+filesystems/
