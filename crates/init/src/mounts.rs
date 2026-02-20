@@ -13,7 +13,7 @@ pub fn mount_drives() {
             None::<&str>,
         ) {
             Ok(_) => info!("Mounted devtmpfs"),
-            Err(e) if e == nix::errno::Errno::EBUSY => info!("/dev already mounted"),
+            Err(nix::errno::Errno::EBUSY) => info!("/dev already mounted"),
             Err(e) => panic!("Failed to mount /dev: {}", e),
         }
     }

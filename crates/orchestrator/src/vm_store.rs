@@ -18,12 +18,11 @@ impl VmStore {
     }
 
     pub fn get_vm(&self, id: &str) -> Option<Arc<VmHandle>> {
-        let vm = self.vms.get(&id.to_string()).cloned();
-        vm
+        self.vms.get(id).cloned()
     }
 
     pub fn remove_vm(&mut self, id: &str) {
-        self.vms.remove(&id.to_string());
+        self.vms.remove(id);
     }
 
     pub fn len(&self) -> usize {

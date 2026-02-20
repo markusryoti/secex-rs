@@ -18,7 +18,7 @@ pub async fn wait_for_socket(vsock_uds_path: &str) {
 }
 
 pub fn remove_existing_vsock(vsock_uds_path: &str) {
-    match std::fs::remove_file(&vsock_uds_path) {
+    match std::fs::remove_file(vsock_uds_path) {
         Ok(_) => info!("Removed existing vsock UDS at {}", vsock_uds_path),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             info!("No existing vsock UDS at {}, proceeding...", vsock_uds_path)
@@ -47,7 +47,7 @@ pub async fn connect_to_vsock(vsock_uds_path: &str) -> UnixStream {
         };
 
         // Send the handshake immediately
-        if let Err(_) = s.write_all(b"CONNECT 5001\n").await {
+        if (s.write_all(b"CONNECT 5001\n").await).is_err() {
             continue;
         }
 

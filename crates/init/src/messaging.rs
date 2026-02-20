@@ -107,7 +107,7 @@ async fn handle_run_workspace(
         }
     }
 
-    let out = match run_program(&entrypoint, &workspace).await {
+    let out = match run_program(&entrypoint, workspace).await {
         Ok(o) => o,
         Err(e) => {
             error!("Error running program: {}", e);
@@ -162,11 +162,11 @@ fn save_upload_payload(workspace: &str, data: &Vec<u8>) -> Result<(), Box<dyn st
 }
 
 fn make_entrypoint_executable(entrypoint: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let meta = std::fs::metadata(&entrypoint)?;
+    let meta = std::fs::metadata(entrypoint)?;
     let mut perms = meta.permissions();
     perms.set_mode(0o755);
 
-    std::fs::set_permissions(&entrypoint, perms)?;
+    std::fs::set_permissions(entrypoint, perms)?;
 
     Ok(())
 }
@@ -176,8 +176,8 @@ async fn run_program(
     workspace: &str,
 ) -> Result<Output, Box<dyn std::error::Error>> {
     let child = tokio::process::Command::new("/bin/sh")
-        .arg(&entrypoint)
-        .current_dir(&workspace)
+        .arg(entrypoint)
+        .current_dir(workspace)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;

@@ -24,9 +24,7 @@ pub fn spawn_vm(seq: usize) -> VmHandle {
 
     tokio::spawn(vm.run(rx));
 
-    let handle = VmHandle::new(id, tx);
-
-    handle
+    VmHandle::new(id, tx)
 }
 
 pub struct VmActor {
@@ -49,9 +47,9 @@ impl VmActor {
         let tap = format!("tap{}", seq);
 
         VmActor {
-            id: id,
+            id,
             api_socket: PathBuf::from(socket_name),
-            tap: tap,
+            tap,
             host_ip: Ipv4Addr::new(172, 16, 0, 1),
             mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
             process: Mutex::new(None),

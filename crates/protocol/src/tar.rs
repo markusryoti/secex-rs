@@ -15,10 +15,7 @@ pub fn tar_workspace(workspace_dir: &str, tar_path: &str) -> std::io::Result<()>
             "Error creating tarball: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Failed to create tarball",
-        ));
+        return Err(std::io::Error::other("Failed to create tarball"));
     }
 
     Ok(())
@@ -37,10 +34,7 @@ pub fn untar_workspace(tar_path: &str, dest_dir: &str) -> std::io::Result<()> {
             "Error extracting tarball: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Failed to extract tarball",
-        ));
+        return Err(std::io::Error::other("Failed to extract tarball"));
     }
 
     Ok(())
