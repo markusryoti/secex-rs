@@ -3,7 +3,7 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use macaddr::{MacAddr, MacAddr6};
@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub fn spawn_vm(seq: usize) -> VmHandle {
-    let vm = VmActor::new(seq);
+    let vm = Arc::new(VmActor::new(seq));
     let id = vm.id.clone();
 
     let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -58,13 +58,15 @@ impl VmActor {
         }
     }
 
-    pub async fn launch(&self) {
-        self.edit_vm_config(&self.vsock_path);
-        self.remove_existing_socket();
+    pub async fn launch(self: Arc<Self>) {
+        let self_clone = Arc::clone(&self);
 
-        vsock::remove_existing_vsock(&self.vsock_path);
+        self_clone.edit_vm_config(&self_clone.vsock_path);
+        self_clone.remove_existing_socket();
 
-        network::setup_tap_device(&self.tap, &self.host_ip.to_string(), "/30")
+        vsock::remove_existing_vsock(&self_clone.vsock_path);
+
+        network::setup_tap_device(&self_clone.tap, &self_clone.host_ip.to_string(), "/30")
             .expect("Tap setup failed");
 
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
@@ -72,52 +74,57 @@ impl VmActor {
 
         info!("Current dir: {:?}", current_dir);
 
-        self.create_rootfs_file().expect("Failed to create rootfs");
+        self_clone
+            .create_rootfs_file()
+            .expect("Failed to create rootfs");
 
-        let stdout_file =
-            File::create(format!("{}.out.log", self.id)).expect("Failed to create stdout log file");
-        let stderr_file =
-            File::create(format!("{}.err.log", self.id)).expect("Failed to create stderr log file");
+        let stdout_file = File::create(format!("{}.out.log", self_clone.id))
+            .expect("Failed to create stdout log file");
+        let stderr_file = File::create(format!("{}.err.log", self_clone.id))
+            .expect("Failed to create stderr log file");
 
         let child = tokio::process::Command::new(&firecracker_path)
             .arg("--api-sock")
-            .arg(self.api_socket.to_str().unwrap())
+            .arg(self_clone.api_socket.to_str().unwrap())
             .arg("--enable-pci")
             .arg("--config-file")
-            .arg(current_dir.join(self.config_name()))
+            .arg(current_dir.join(self_clone.config_name()))
             .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("Failed to start firecracker");
 
         {
-            let mut process = self.process.lock().expect("Failed to grab process mutex");
+            let mut process = self_clone
+                .process
+                .lock()
+                .expect("Failed to grab process mutex");
             *process = Some(child);
         }
 
         info!(
             "VM {} launched with API socket at {:?} and TAP device {}",
-            self.id, self.api_socket, self.tap
+            self_clone.id, self_clone.api_socket, self_clone.tap
         );
 
-        vsock::wait_for_socket(&self.vsock_path).await;
+        vsock::wait_for_socket(&self_clone.vsock_path).await;
 
-        let stream = vsock::connect_to_vsock(&self.vsock_path).await;
+        let stream = vsock::connect_to_vsock(&self_clone.vsock_path).await;
 
         let (reader, writer) = stream.into_split();
 
         {
-            let mut write_guard = self.writer.lock().await;
+            let mut write_guard = self_clone.writer.lock().await;
             *write_guard = Some(writer);
         }
 
-        tokio::spawn(handle_incoming(reader));
+        tokio::spawn(async move { self_clone.handle_incoming(reader).await });
     }
 
-    pub async fn run(self, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
+    pub async fn run(self: Arc<Self>, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
         while let Some(msg) = rx.recv().await {
             match msg {
-                VmMessage::StartVm => self.launch().await,
+                VmMessage::StartVm => self.clone().launch().await,
                 VmMessage::Command(run_command) => self
                     .send_message(protocol::Message::RunCommand(run_command))
                     .await
@@ -139,6 +146,28 @@ impl VmActor {
         };
 
         Ok(())
+    }
+
+    async fn handle_incoming<T: AsyncReadExt + Unpin>(&self, mut stream: T) {
+        loop {
+            let message = match protocol::recv_msg(&mut stream).await {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Error receiving message: {}", e);
+                    return;
+                }
+            };
+
+            match message {
+                protocol::Message::Hello => {
+                    info!("Guest said Hello!");
+                }
+                protocol::Message::CommandOutput(output) => {
+                    info!("Received command output from guest: {}", output.output);
+                }
+                m => info!("Received other message: {:?}", m),
+            }
+        }
     }
 
     pub fn cleanup(&self) {
@@ -207,27 +236,5 @@ impl VmActor {
             .expect("Failed to remove socket with sudo");
 
         info!("Removed existing socket at {}", self.api_socket.display());
-    }
-}
-
-async fn handle_incoming<T: AsyncReadExt + Unpin>(mut stream: T) {
-    loop {
-        let message = match protocol::recv_msg(&mut stream).await {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Error receiving message: {}", e);
-                return;
-            }
-        };
-
-        match message {
-            protocol::Message::Hello => {
-                info!("Guest said Hello!");
-            }
-            protocol::Message::CommandOutput(output) => {
-                info!("Received command output from guest: {}", output.output);
-            }
-            m => info!("Received other message: {:?}", m),
-        }
     }
 }
