@@ -59,14 +59,12 @@ impl VmActor {
     }
 
     pub async fn launch(self: Arc<Self>) {
-        let self_clone = Arc::clone(&self);
+        self.edit_vm_config(&self.vsock_path);
+        self.remove_existing_socket();
 
-        self_clone.edit_vm_config(&self_clone.vsock_path);
-        self_clone.remove_existing_socket();
+        vsock::remove_existing_vsock(&self.vsock_path);
 
-        vsock::remove_existing_vsock(&self_clone.vsock_path);
-
-        network::setup_tap_device(&self_clone.tap, &self_clone.host_ip.to_string(), "/30")
+        network::setup_tap_device(&self.tap, &self.host_ip.to_string(), "/30")
             .expect("Tap setup failed");
 
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
@@ -74,51 +72,46 @@ impl VmActor {
 
         info!("Current dir: {:?}", current_dir);
 
-        self_clone
-            .create_rootfs_file()
-            .expect("Failed to create rootfs");
+        self.create_rootfs_file().expect("Failed to create rootfs");
 
-        let stdout_file = File::create(format!("{}.out.log", self_clone.id))
-            .expect("Failed to create stdout log file");
-        let stderr_file = File::create(format!("{}.err.log", self_clone.id))
-            .expect("Failed to create stderr log file");
+        let stdout_file =
+            File::create(format!("{}.out.log", self.id)).expect("Failed to create stdout log file");
+        let stderr_file =
+            File::create(format!("{}.err.log", self.id)).expect("Failed to create stderr log file");
 
         let child = tokio::process::Command::new(&firecracker_path)
             .arg("--api-sock")
-            .arg(self_clone.api_socket.to_str().unwrap())
+            .arg(self.api_socket.to_str().unwrap())
             .arg("--enable-pci")
             .arg("--config-file")
-            .arg(current_dir.join(self_clone.config_name()))
+            .arg(current_dir.join(self.config_name()))
             .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("Failed to start firecracker");
 
         {
-            let mut process = self_clone
-                .process
-                .lock()
-                .expect("Failed to grab process mutex");
+            let mut process = self.process.lock().expect("Failed to grab process mutex");
             *process = Some(child);
         }
 
         info!(
             "VM {} launched with API socket at {:?} and TAP device {}",
-            self_clone.id, self_clone.api_socket, self_clone.tap
+            self.id, self.api_socket, self.tap
         );
 
-        vsock::wait_for_socket(&self_clone.vsock_path).await;
+        vsock::wait_for_socket(&self.vsock_path).await;
 
-        let stream = vsock::connect_to_vsock(&self_clone.vsock_path).await;
+        let stream = vsock::connect_to_vsock(&self.vsock_path).await;
 
         let (reader, writer) = stream.into_split();
 
         {
-            let mut write_guard = self_clone.writer.lock().await;
+            let mut write_guard = self.writer.lock().await;
             *write_guard = Some(writer);
         }
 
-        tokio::spawn(async move { self_clone.handle_incoming(reader).await });
+        tokio::spawn(async move { self.handle_incoming(reader).await });
     }
 
     pub async fn run(self, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
