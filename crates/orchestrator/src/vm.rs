@@ -126,7 +126,7 @@ impl VmActor {
 
         while let Some(msg) = rx.recv().await {
             match msg {
-                VmMessage::StartVm => async { self_pointer.clone().launch().await }.await,
+                VmMessage::StartVm => self_pointer.clone().launch().await,
                 VmMessage::Command(run_command) => self_pointer
                     .send_message(protocol::Message::RunCommand(run_command))
                     .await
