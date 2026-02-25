@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub fn spawn_vm(seq: usize) -> VmHandle {
-    let vm = Arc::new(VmActor::new(seq));
+    let vm = VmActor::new(seq);
     let id = vm.id.clone();
 
     let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -121,19 +121,21 @@ impl VmActor {
         tokio::spawn(async move { self_clone.handle_incoming(reader).await });
     }
 
-    pub async fn run(self: Arc<Self>, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
+    pub async fn run(self, mut rx: tokio::sync::mpsc::Receiver<VmMessage>) {
+        let self_pointer = Arc::new(self);
+
         while let Some(msg) = rx.recv().await {
             match msg {
-                VmMessage::StartVm => self.clone().launch().await,
-                VmMessage::Command(run_command) => self
+                VmMessage::StartVm => async { self_pointer.clone().launch().await }.await,
+                VmMessage::Command(run_command) => self_pointer
                     .send_message(protocol::Message::RunCommand(run_command))
                     .await
                     .unwrap(),
-                VmMessage::WorkspaceCommand(workspace_run_options) => self
+                VmMessage::WorkspaceCommand(workspace_run_options) => self_pointer
                     .send_message(protocol::Message::RunWorkspace(workspace_run_options))
                     .await
                     .unwrap(),
-                VmMessage::Shutdown => self.cleanup(),
+                VmMessage::Shutdown => self_pointer.cleanup(),
             }
         }
     }
