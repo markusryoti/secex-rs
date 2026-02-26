@@ -6,9 +6,10 @@ use tracing::{error, info};
 
 pub async fn handle_messages(stream: &mut VsockStream) {
     loop {
-        let message = protocol::recv_msg(stream)
-            .await
-            .expect("Failed to receive message");
+        let message = match protocol::recv_msg(stream).await {
+            Ok(m) => m,
+            Err(e) => return error!("Error reading from stream: {}", e),
+        };
 
         match message {
             protocol::Message::Hello => {
