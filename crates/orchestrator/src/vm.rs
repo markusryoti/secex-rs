@@ -41,7 +41,7 @@ pub struct VmActor {
 impl VmActor {
     fn new(seq: usize) -> Self {
         let id = format!("vm-{}", seq);
-        let socket_name = format!("/tmp/firecracker-{}.socket", seq);
+        let socket_name = format!("/tmp/firecracker-{}.sock", seq);
         let vsock_uds_path = format!("/tmp/vsock-{}.sock", id);
 
         let tap = format!("tap{}", seq);

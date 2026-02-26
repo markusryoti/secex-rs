@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
+use tracing::error;
 
 mod firecracker;
 mod network;
@@ -17,18 +18,32 @@ async fn main() {
 
     let store = Arc::new(Mutex::new(vm_store::VmStore::new()));
 
-    let vm = vm::spawn_vm(store.lock().await.len() + 1);
-    let id = vm.id.clone();
+    let vm1 = vm::spawn_vm(store.lock().await.len() + 1);
+    let id1 = vm1.id.clone();
 
-    store.lock().await.add_vm(&id, vm);
+    store.lock().await.add_vm(&id1, vm1);
 
-    let vm = store.lock().await.get_vm(&id).unwrap();
+    let vm2 = vm::spawn_vm(store.lock().await.len() + 1);
+    let id2 = vm2.id.clone();
 
-    let handle = tokio::spawn(handle_vm(vm));
+    store.lock().await.add_vm(&id2, vm2);
 
-    handle.await.expect("Failed to wait task handle");
+    let vm1 = store.lock().await.get_vm(&id1).unwrap();
+    let vm2 = store.lock().await.get_vm(&id2).unwrap();
 
-    store.lock().await.remove_vm(&id);
+    let handles: Vec<_> = [vm1, vm2]
+        .into_iter()
+        .map(|vm| tokio::spawn(handle_vm(vm)))
+        .collect();
+
+    futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .filter_map(|r| r.err())
+        .for_each(|e| error!("Error from task: {}", e));
+
+    store.lock().await.remove_vm(&id1);
+    store.lock().await.remove_vm(&id2);
 
     network::cleanup_ip_forwarding().expect("Failed to cleanup forwarding");
 }
