@@ -32,6 +32,8 @@ pub struct VmActor {
     api_socket: PathBuf,
     tap: String,
     host_ip: Ipv4Addr,
+    guest_ip: Ipv4Addr,
+    guest_cid: u32,
     mac: MacAddr,
     process: Mutex<Option<Child>>,
     writer: tokio::sync::Mutex<Option<OwnedWriteHalf>>,
@@ -42,24 +44,32 @@ impl VmActor {
     fn new(seq: usize) -> Self {
         let id = format!("vm-{}", seq);
         let socket_name = format!("/tmp/firecracker-{}.sock", seq);
-        let vsock_uds_path = format!("/tmp/vsock-{}.sock", id);
+        let vsock_path = format!("/tmp/vsock-{}.sock", id);
 
         let tap = format!("tap{}", seq);
+
+        let host_ip = Ipv4Addr::new(172, 16, seq as u8, 1);
+        let guest_ip = Ipv4Addr::new(172, 16, seq as u8, 2);
+        let mac = MacAddr6::new(0x06, 0x00, 0xAC, 0x10, seq as u8, 0x02).into();
+
+        let guest_cid = (seq + 100) as u32;
 
         VmActor {
             id,
             api_socket: PathBuf::from(socket_name),
             tap,
-            host_ip: Ipv4Addr::new(172, 16, 0, 1),
-            mac: MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02).into(),
+            host_ip,
+            guest_ip,
+            guest_cid,
+            mac,
             process: Mutex::new(None),
             writer: tokio::sync::Mutex::new(None),
-            vsock_path: vsock_uds_path,
+            vsock_path,
         }
     }
 
     pub async fn launch(self: Arc<Self>) {
-        self.edit_vm_config(&self.vsock_path);
+        self.edit_vm_config();
         self.remove_existing_socket();
 
         vsock::remove_existing_vsock(&self.vsock_path);
@@ -181,7 +191,7 @@ impl VmActor {
         Ok(())
     }
 
-    fn edit_vm_config(&self, vsock_uds_path: &str) {
+    fn edit_vm_config(&self) {
         let current_dir = std::env::current_dir().expect("Failed to get current directory");
 
         let mut config = firecracker::FirecrackerConfig::from_file(
@@ -189,9 +199,16 @@ impl VmActor {
         )
         .expect("Failed to read Firecracker config file");
 
+        let boot_args = format!(
+            "console=ttyS0 reboot=k panic=1 init=/init \
+            vm.ip={} vm.gateway={} vm.iface=eth0 vm.cid={}",
+            self.guest_ip, self.host_ip, self.guest_cid
+        );
+
         let log_path = current_dir.join(format!("{}-firecracker.log", self.id));
 
         config.fill_values(
+            &boot_args,
             current_dir
                 .join("vmlinux-kernel")
                 .to_str()
@@ -206,7 +223,8 @@ impl VmActor {
                 .join(log_path)
                 .to_str()
                 .expect("Invalid log path"),
-            vsock_uds_path,
+            &self.vsock_path,
+            self.guest_cid,
         );
 
         let config_file = current_dir.join(self.config_name());
