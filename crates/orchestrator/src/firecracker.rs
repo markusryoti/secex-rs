@@ -13,7 +13,7 @@ pub struct FirecrackerConfig {
     pub balloon: Value,
     #[serde(rename = "network-interfaces")]
     pub network_interfaces: Vec<NetworkInterface>,
-    pub vsock: Value,
+    pub vsock: Vsock,
     pub logger: Logger,
     pub metrics: Value,
     #[serde(rename = "mmds-config")]
@@ -22,6 +22,13 @@ pub struct FirecrackerConfig {
     pub pmem: Vec<Value>,
     #[serde(rename = "memory-hotplug")]
     pub memory_hotplug: Value,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Vsock {
+    pub vsock_id: String,
+    pub guest_cid: u32,
+    pub uds_path: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,22 +90,30 @@ impl FirecrackerConfig {
 
     pub fn fill_values(
         &mut self,
+        boot_args: &str,
         kernel_image_path: &str,
         drive_path: &str,
         tap_name: &str,
         mac_address: &str,
         log_path: &str,
         vsock_uds_path: &str,
+        guest_cid: u32,
     ) {
+        self.boot_source.boot_args = boot_args.to_string();
         self.boot_source.kernel_image_path = kernel_image_path.to_string();
+
+        self.vsock.guest_cid = guest_cid;
+
         if let Some(drive) = self.drives.get_mut(0) {
             drive.path_on_host = drive_path.to_string();
         }
+
         if let Some(net_iface) = self.network_interfaces.get_mut(0) {
             net_iface.host_dev_name = tap_name.to_string();
             net_iface.guest_mac = mac_address.to_string();
         }
+
         self.logger.log_path = log_path.to_string();
-        self.vsock["uds_path"] = serde_json::json!(vsock_uds_path);
+        self.vsock.uds_path = vsock_uds_path.to_string();
     }
 }
