@@ -168,7 +168,8 @@ impl VmActor {
                     info!("Guest said Hello!");
                 }
                 protocol::Message::CommandOutput(output) => {
-                    info!("Received command output from guest: {}", output.output);
+                    info!("Received command output from guest:",);
+                    info!("{}", output.output);
                 }
                 m => info!("Received other message: {:?}", m),
             }

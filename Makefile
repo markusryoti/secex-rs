@@ -1,6 +1,6 @@
 orchestrator:
 	cargo build --bin orchestrator
-	sudo target/debug/orchestrator
+	sudo target/debug/orchestrator 2>&1 | tee output.log
 
 build-init:
 	cargo build --release --package init --target x86_64-unknown-linux-musl
@@ -13,16 +13,17 @@ kill-fc-processes:
 	pkill -f firecracker || true
 
 clean-sockets:
-	sudo rm -f /tmp/vsock-vm-*.sock /tmp/firecracker-*.socket; echo "Sockets cleaned"
+	sudo rm -f /tmp/vsock-vm-*.sock /tmp/firecracker-*.sock; echo "Sockets cleaned"
 
 list-sockets:
 	ls -l /tmp | grep -e 'vsock-vm-.*\.sock' -e 'firecracker-.*\.socket' || echo "No sockets found"
 
 remove-logs:
-	find . -name "vm-*-firecracker.log" -type f -delete; \
-	find . -name "vm-*.out.log" -type f -delete; \
-	find . -name "vm-*.err.log" -type f -delete; \
+	find . -name "vm-*.log" -type f -delete; \
 	echo "Log files removed"
+
+remove-configs:
+	rm vm-*.json
 
 download-kernel:
 	./tools/download-kernel.sh
